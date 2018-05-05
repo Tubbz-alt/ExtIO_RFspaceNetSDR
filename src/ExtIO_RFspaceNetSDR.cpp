@@ -1,41 +1,32 @@
 
 #define HWNAME "RFspace"
 #define HWMODEL "RFspace NetSDR"
-#define SETTINGS_IDENTIFIER "RFspace NetSDR-0.1"
-
-#define IGNORE_CONF_DATA_DEST 0
-
-#if IGNORE_CONF_DATA_DEST
-// for test with "dump_tcp_forwarding.exe -v 58666"
-#define DATA_DEST_IP    "10.10.11.2"
-#define DATA_DEST_PORT  50000
-#else
-#define DATA_DEST_IP    gacDataIP
-#define DATA_DEST_PORT  guDataPortNo
-#endif
+#define SETTINGS_IDENTIFIER "RFspace NetSDR-0.2"
 
 #include "ExtIO_RFspaceNetSDR.h"
 #include "rfspace_netsdr_receiver.h"
 
-#include "common/base/baselib/base/ProLogging.h"
-#include "foreign/extio/common/ExtIO_ProLogImpl.h"
-
+#include "ExtIO_Logging.h"
 
 //---------------------------------------------------------------------------
 
-#include "foreign/tinythread/tinythread.h"
+#include "procitec_replacements.h"
 
-#include "common/base/baselib/base/TimeMeasuring.h"
-#include "common/base/baselib/base/ProStd.h"
-#include "common/base/baselib/base/ProVersion.h"
-#include "common/base/baselib/base/ProMakros.h"
 
 #if defined( WIN32 ) || defined( WIN64 )
-// #define WIN32_LEAN_AND_MEAN             // Selten verwendete Teile der Windows-Header nicht einbinden.
-#include <windows.h>
+
+#define WIN32_LEAN_AND_MEAN             // Selten verwendete Teile der Windows-Header nicht einbinden.
+#ifndef _WINSOCK2API_
+#define _WINSOCK2API_
+#define _WINSOCKAPI_
+#endif
+#include <Windows.h>
 #endif
 
+#include "tinythread.h"
+
 #include <string.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <math.h>
 #include <limits.h>
@@ -204,36 +195,6 @@ static void ReceiverThreadProc( void* lpParameter )
   gbControlThreadRunning = false;
 }
 
-
-//---------------------------------------------------------------------------
-
-#if 0
-static void ReceptionStreamThreadProc( void* lpParameter )
-{
-  (void)lpParameter;
-
-  MonotonicClock oClock;
-
-  uint64_t uTicksNew           = 0;
-  uint64_t uLastReceivedPacket = oClock.msecs();
-
-  while ( 1 )
-  {
-    if ( !gbDataStreamActivated )
-    {
-      // wait for control - before binding UDP port, when using UDP protocol
-      tthread::this_thread::sleep_for( tthread::chrono::milliseconds( 1 ) );
-      continue;
-    }
-
-    gbBoundTcpDataPort = true;
-    while ( 1 )
-    {
-      uLastReceivedPacket = oClock.msecs();
-    }
-  }
-}
-#endif
 
 //---------------------------------------------------------------------------
 
@@ -669,6 +630,8 @@ enum class Setting {
       ID = 0      // enum values MUST be incremental without gaps!
     , CTRL_IP, CTRL_PORT    // NetSDR IP/Port
     , DATA_IP, DATA_PORT    // myPC Data IP/Port
+    , AVAIL_SRATES
+    , AVAIL_BWS
     , SAMPLERATE_IDX
     , RCV_FRQ
     , RCV_BW
@@ -690,6 +653,8 @@ enum class Setting {
 
 int EXTIO_CALL ExtIoGetSetting( int idx, char* description, char* value )
 {
+  int k;
+  size_t off;
   if (!gpoSettings)
     gpoSettings = new RFspaceNetReceiver::Settings();
 
@@ -710,12 +675,38 @@ int EXTIO_CALL ExtIoGetSetting( int idx, char* description, char* value )
       return 0;
 
     case Setting::DATA_IP:
-      snprintf( description, 1024, "%s", "DATA IP: IP-Address of Client PC to receive streaming data" );
+      snprintf( description, 1024, "%s", "DATA_IP: IP-Address of Client PC to receive streaming data" );
       snprintf( value, 1024, "%s", gpoSettings->acDataIP );
       return 0;
     case Setting::DATA_PORT:
       snprintf( description, 1024, "%s", "DATA PortNo: port number of Client PC to receive streaming data (default: as CONTROL PortNo)" );
       snprintf( value, 1024, "%d", gpoSettings->uDataPortNo );
+      return 0;
+
+    case Setting::AVAIL_SRATES:
+      snprintf(description, 1024, "info: %d available samplerates - per idx", RFspaceNetReceiver::miNumSamplerates );
+      off = 0;
+      value[0] = 0;
+      for (k = 0; k < RFspaceNetReceiver::miNumSamplerates; ++k)
+      {
+        int w = snprintf(value + off, 1024 - off, "%s%d: %u", (k == 0 ? "":", "), k, unsigned(RFspaceNetReceiver::maiSamplerates[k]) );
+        if (w < 0 || w >= (1024 - int(off)))
+          break;
+        off += w;
+      }
+      return 0;
+
+    case Setting::AVAIL_BWS:
+      snprintf(description, 1024, "info: %d available bandwidths - per idx", RFspaceNetReceiver::miNumSamplerates);
+      off = 0;
+      value[0] = 0;
+      for (k = 0; k < RFspaceNetReceiver::miNumSamplerates; ++k)
+      {
+        int w = snprintf(value + off, 1024 - off, "%s%d: %u", (k == 0 ? "" : ", "), k, unsigned(RFspaceNetReceiver::maiBandwidths[k]));
+        if (w < 0 || w >= (1024 - int(off)))
+          break;
+        off += w;
+      }
       return 0;
 
     case Setting::SAMPLERATE_IDX:
@@ -729,7 +720,7 @@ int EXTIO_CALL ExtIoGetSetting( int idx, char* description, char* value )
       return 0;
 
     case Setting::RCV_BW:
-      snprintf( description, 1024, "%s", "bandwidth in Hz for Receiver:  10 / 25 / 50 / 80 / 100 / 200 / 400 / 500 / 800 / 1300 / 1600 kHz" );
+      snprintf( description, 1024, "%s", "(last) bandwidth in Hz for Receiver" );
       snprintf( value, 1024, "%d", gpoSettings->uiBandwidth );
       return 0;
 
@@ -739,7 +730,7 @@ int EXTIO_CALL ExtIoGetSetting( int idx, char* description, char* value )
       return 0;
 
     case Setting::BITDEPTH_CHANGE_SMPRATE:
-      snprintf( description, 1024, "%s", "Samplerate at which bitdepth is being changed from 24 to 16 bit and vice verca." );
+      snprintf( description, 1024, "%s", "Samplerate at which bitdepth is reduced from 24 to 16 bit. For samplerates <= value, you get 24 Bit, else 16 bit. From Specification: 1 333 333 Hz." );
       snprintf( value, 1024, "%u", gpoSettings->iBitDepthThresSamplerate);
       return 0;
 
@@ -754,12 +745,12 @@ int EXTIO_CALL ExtIoGetSetting( int idx, char* description, char* value )
       return 0;
 
     case Setting::IS_VUHF_RANGE:
-      snprintf( description, 1024, "%s", "Is this reveiver in VUHG range ?" );
+      snprintf( description, 1024, "%s", "Is this receiver in V/UHF range ?" );
       snprintf( value, 1024, "%u", gpoSettings->bIsVUHFRange);
       return 0;
 
     case Setting::COMPATIBILITY_VALUE:
-      snprintf( description, 1024, "%s", "VUHF Compatibility Gain Level 0 ... 3" );
+      snprintf( description, 1024, "%s", "V/UHF Compatibility Gain Level 0 ... 3" );
       snprintf( value, 1024, "%u", gpoSettings->iCompatibilityValue);
       return 0;
 
@@ -795,12 +786,55 @@ int EXTIO_CALL ExtIoGetSetting( int idx, char* description, char* value )
   return -1; // ERROR
 }
 
+static const char * trimmedIP(const char * value, const char * logText)
+{
+  static char acBuf[1024];
+  char * pBlockStart[4] = { 0, 0, 0, 0 };
+  int k = 0;
+
+  // to first digit
+  while (value[0] && !isdigit(value[0]))
+    ++value;
+  if (!value[0])
+  {
+    LOG_PRO(LOG_ERROR, "Error in %s or empty IP address", logText);
+    return "";
+  }
+
+  for (int j = 1; j <= 4; ++j)
+  {
+    pBlockStart[j - 1] = &acBuf[k];
+
+    // j.th numeric block
+    while (value[0] && isdigit(value[0]))
+      acBuf[k++] = *value++;
+
+    // '.' ?
+    if (j < 4)
+    {
+      if (value[0] == '.')
+        ++value;
+      else
+      {
+        LOG_PRO(LOG_ERROR, "Error in %s for %d.th numeric block!", logText, j);
+        return "";
+      }
+    }
+  }
+
+  // zero termination
+  acBuf[k++] = 0;
+
+  return acBuf;
+}
+
 
 void EXTIO_CALL ExtIoSetSetting( int idx, const char* value )
 {
   if (!gpoSettings)
     gpoSettings = new RFspaceNetReceiver::Settings();
 
+  int64_t tempI64;
   int    tempInt;
   // now we know that there's no need to save our settings into some (.ini) file,
   // what won't be possible without admin rights!!!,
@@ -819,18 +853,21 @@ void EXTIO_CALL ExtIoSetSetting( int idx, const char* value )
       // make identifier version specific??? - or not ==> never change order of idx!
       break;
     case Setting::CTRL_IP:
-      snprintf( gpoSettings->acCtrlIP, 64, "%s", value );
+      snprintf(gpoSettings->acCtrlIP, 64, "%s", trimmedIP(value, "CTRL_IP"));
       break;
     case Setting::CTRL_PORT:
       tempInt = atoi( value );
       gpoSettings->uCtrlPortNo = (uint16_t)( tempInt & 0xffff );
       break;
     case Setting::DATA_IP:
-      snprintf( gpoSettings->acDataIP, 64, "%s", value );
+      snprintf(gpoSettings->acDataIP, 64, "%s", trimmedIP(value, "DATA_IP"));
       break;
     case Setting::DATA_PORT:
       tempInt = atoi( value );
       gpoSettings->uDataPortNo = (uint16_t)( tempInt & 0xffff );
+      break;
+    case Setting::AVAIL_SRATES:
+    case Setting::AVAIL_BWS:
       break;
     case Setting::SAMPLERATE_IDX:
       gpoSettings->iSampleRateIdx = atoi( value );
@@ -848,10 +885,12 @@ void EXTIO_CALL ExtIoSetSetting( int idx, const char* value )
       gpoSettings->iBitDepthThresSamplerate = atoi( value );
       break;
     case Setting::BAND1_RANGE_MINFREQ:
-       gpoSettings->iBand_minFreq = atoi( value );
+       gpoSettings->iBand_minFreq = atol( value );
        break;
     case Setting::BAND1_RANGE_MAXFREQ:
-       gpoSettings->iBand_maxFreq = atoi( value );
+      tempI64 = atol(value);
+      if (gpoSettings->iBand_minFreq < tempI64) // reject when min > max
+        gpoSettings->iBand_maxFreq = tempI64;
        break;
     case Setting::IS_VUHF_RANGE:
        gpoSettings->bIsVUHFRange = atoi( value ) ? true : false;
@@ -904,7 +943,7 @@ void EXTIO_CALL ExtIoSDRInfo( int extSDRInfo, int additionalValue, void * additi
   case extSDR_supports_SampleFormats:
     break;
   case extSDR_supports_Logging:
-    gbUseProcitecEnums = false;
+    SDRsupportsLogging = true;
     break;
   default: ;
   }

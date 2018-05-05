@@ -55,7 +55,7 @@
 
 
 
-#include "common/functions/receiverlib/LC_ExtIO_Types.h"
+#include "LC_ExtIO_Types.h"
 
 EXTIO_API const char * EXTIO_CALL GetBuildInfo();
 EXTIO_API const char * EXTIO_CALL GetExtIOVersion();

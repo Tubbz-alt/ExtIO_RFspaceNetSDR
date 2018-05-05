@@ -1,21 +1,28 @@
 
 #include "rfspace_netsdr_receiver.h"
-#include "common/base/baselib/base/ProLogging.h"
-#include "common/base/baselib/base/ProMakros.h"
-#include "common/base/baselib/base/ProStd.h"
+#include "ExtIO_Logging.h"
+#include "procitec_replacements.h"
 
 #include <string.h>
 #include <cstring>
 #include <assert.h>
-//#include <tgmath.h>
 
+#define KHZ *1000
+// from NetSDR specification:
+//   This parameter limited to frequencies that are integer divisions by 4 of the 80MHz A/D sample rate
+//   The maximum sample rate supported is 2,000,000 Hz in the 16 bits/sample mode.(80MHz/40)
+//   The maximum sample rate supported is 1,333,333 Hz in the 24 bits/sample mode.(80MHz/60)
+//   The minimum sample rate supported is 32,000 Hz in the 16 or 24 bits/sample mode.( 80MHz/250)
+//   
+// decim from 80 MHz A/D clock:                       6400   5000    2500    1280    1000    800      640      500      400      320      256      200      160      128      100      80        64        52        48        44        40
+const uint32_t RFspaceNetReceiver::maiSamplerates[] { 12500, 16 KHZ, 32 KHZ, 62500,  80 KHZ, 100 KHZ, 125 KHZ, 160 KHZ, 200 KHZ, 250 KHZ, 312500,  400 KHZ, 500 KHZ, 625 KHZ, 800 KHZ, 1000 KHZ, 1250 KHZ, 1538461,  1666666,  1818181,  2000 KHZ };
+const uint32_t RFspaceNetReceiver::maiBandwidths[] { 10 KHZ, 12 KHZ, 25 KHZ, 50 KHZ, 64 KHZ,  80 KHZ, 100 KHZ, 128 KHZ, 160 KHZ, 200 KHZ, 250 KHZ, 320 KHZ, 400 KHZ, 500 KHZ, 640 KHZ, 800 KHZ,  1000 KHZ, 1200 KHZ, 1300 KHZ, 1400 KHZ, 1600 KHZ };
+#undef KHZ
 
-const uint32_t RFspaceNetReceiver::maiSamplerates[] { 12500, 32000, 62500, 100*1000, 125*1000, 250*1000, 500*1000, 625*1000, 1000*1000, 1666666, 2000*1000 };
-const uint32_t RFspaceNetReceiver::maiBandwidths[] { 10*1000, 25*1000, 50*1000, 80*1000, 100*1000, 200*1000, 400*1000, 500*1000, 800*1000, 1300*1000, 1600*1000 };
-const float RFspaceNetReceiver::mafAttenuationATTs[]    = { -30.0F, -30.0F, -20.0F, -20.0F, -10.0F, -10.0F, 0.0F, 0.0F };
-const float RFspaceNetReceiver::mafActualAttenuationATTs[]    = { -30.0F, -26.5F, -20.0F, -16.5F, -10.0F, -6.5F, 0.0F, 3.5F };
-const float RFspaceNetReceiver::mafAttenuationADGains[] = {   1.0F,   1.5F,   1.0F,   1.5F,   1.0F,   1.5F, 1.0F, 1.5F };
-const float RFspaceNetReceiver::mafAttenuationADGainsdB[] = { 0.0F,   3.0F,   0.0F,   3.0F,   0.0F,   3.0F, 0.0F, 3.0F };
+const float RFspaceNetReceiver::mafAttenuationATTs[]       = { -30.0F, -30.0F, -20.0F, -20.0F, -10.0F, -10.0F, 0.0F, 0.0F };
+const float RFspaceNetReceiver::mafActualAttenuationATTs[] = { -30.0F, -26.5F, -20.0F, -16.5F, -10.0F,  -6.5F, 0.0F, 3.5F };
+const float RFspaceNetReceiver::mafAttenuationADGains[]    = {   1.0F,   1.5F,   1.0F,   1.5F,   1.0F,   1.5F, 1.0F, 1.5F };
+const float RFspaceNetReceiver::mafAttenuationADGainsdB[]  = {   0.0F,   3.0F,   0.0F,   3.0F,   0.0F,   3.0F, 0.0F, 3.0F };
 
 const float RFspaceNetReceiver::mafVUHFCompatibilityGainValues[] = {0, 1, 2, 3 };
 const float RFspaceNetReceiver::mafVUHFMultiGainValues[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
@@ -590,7 +597,7 @@ bool RFspaceNetReceiver::startHW(int64_t LOfreq)
     mpoSettings->iFrequency = LOfreq;
 
     mSampleBufferLenInFrames = 0;
-    mChangeBitRangeSmpRateIdx = getSmpRateIdx(mpoSettings->iBitDepthThresSamplerate);
+    mChangeBitRangeSmpRateIdx = getMaxSmpRateIdx(mpoSettings->iBitDepthThresSamplerate);
 
     if( mpoSettings->iSampleRateIdx <= mChangeBitRangeSmpRateIdx)
     {
@@ -784,8 +791,6 @@ void RFspaceNetReceiver::setSamplerate( int idx )
   //--> give samplerate change (and sometimes therefore bitdepth change) more time.
   mStartUDPTimer = 100; //in ms
   mStartData = true;
-
-
 }
 
 int64_t RFspaceNetReceiver::getHWLO( void )
@@ -811,7 +816,8 @@ int RFspaceNetReceiver::getSmpRateIdx( uint32_t smpRate )
   int ret = -1;
   for(int idx = 0; idx < miNumSamplerates; ++idx)
   {
-    if(smpRate == maiSamplerates[idx])
+    int32_t delta = smpRate - maiSamplerates[idx];
+    if( -10 <= delta && delta <= 10 )   // +/- 10 Hz tolerance
     {
       LOG_PRO( LOG_DEBUG, "********* RFspaceNetReceiver::getSmpRateIdx(%u) --> idx: %d", smpRate, idx);
       ret = idx;
@@ -820,11 +826,28 @@ int RFspaceNetReceiver::getSmpRateIdx( uint32_t smpRate )
   }
 
   if(ret == -1)
-    LOG_PRO( LOG_DEBUG, "********* RFspaceNetReceiver::getSmpRateIdx(%u) --> idx: ERROR !", smpRate);
+    LOG_PRO(LOG_ERROR, "********* RFspaceNetReceiver::getSmpRateIdx(%u) --> idx: ERROR !", smpRate);
 
   return ret;
-
 }
+
+
+int RFspaceNetReceiver::getMaxSmpRateIdx(uint32_t smpRate)
+{
+  int ret = -1;
+  for (int idx = 0; idx < miNumSamplerates; ++idx)
+  {
+    if (smpRate >= maiSamplerates[idx])
+      ret = idx;
+  }
+  if (ret == -1)
+    LOG_PRO(LOG_ERROR, "********* RFspaceNetReceiver::getMaxSmpRateIdx(%u) --> idx: ERROR !", smpRate);
+  else
+    LOG_PRO(LOG_DEBUG, "********* RFspaceNetReceiver::getMaxSmpRateIdx(%u) --> idx: %d", smpRate, ret);
+
+  return ret;
+}
+
 
 const int64_t * RFspaceNetReceiver::getFrequencyRanges(int idx)
 {

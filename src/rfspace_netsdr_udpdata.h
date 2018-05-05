@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <math.h>
 
-#include "foreign/clsocket/clsocket/src/SimpleSocket.h"
-#include "foreign/clsocket/clsocket/src/PassiveSocket.h"
+#include "SimpleSocket.h"
+#include "PassiveSocket.h"
 
 // forward declaration
 class CPassiveSocket;

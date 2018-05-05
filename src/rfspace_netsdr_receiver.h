@@ -3,10 +3,7 @@
 #include "rfspace_netsdr_control.h"
 #include "rfspace_netsdr_udpdata.h"
 
-#include "common/functions/receiverlib/LC_ExtIO_Types.h"
-
-#include "common/base/baselib/base/ByteOrder.h"
-#include "common/base/baselib/base/ExtendedTypes.h"
+#include "LC_ExtIO_Types.h"
 
 #include <string.h>
 
@@ -30,17 +27,16 @@ public:
   public:
     Settings()
     {
-      strcpy(acCtrlIP, "10.10.11.2");
-      strcpy(acDataIP, "");
-      uCtrlPortNo = uDataPortNo = 50000;
-      iSampleRateIdx = 0;
+      strcpy(acCtrlIP, "192.168.8.101");  // "10.10.11.2"
+      strcpy(acDataIP, "192.168.8.100");  // ""   main PC: 192.168.8.100  PC2: 192.168.8.102
+      uCtrlPortNo = uDataPortNo = 50002;  // 50000
+      iSampleRateIdx = 2;                 // 2: 32 kHz samplerate
       iAttenuationIdx = 0;
 
-      iBitDepthThresSamplerate = 0;
-
+      iBitDepthThresSamplerate = 1333333; // 1333.333 kHz == 80 MHz / 60
 
       iBand_minFreq = 0;
-      iBand_maxFreq = 0;
+      iBand_maxFreq = 34 * 1000L * 1000L; // 0 - 34 MHz
 
       uiBandwidth = 0;
       uiSamplerate = 0;
@@ -138,6 +134,7 @@ public:
   int64_t getHWLO( void );
   int getAttIdx( void );
   int getSmpRateIdx( uint32_t );
+  int getMaxSmpRateIdx(uint32_t);
   const int64_t * getFrequencyRanges( int idx );
 
   void TimerProc(uint16_t waitMs);

@@ -1,9 +1,8 @@
 
 #include "rfspace_netsdr_udpdata.h"
 
-#include "common/base/baselib/base/ByteOrder.h"
-#include "common/base/baselib/base/ProStd.h"
-#include "common/base/baselib/base/ProLogging.h"
+#include "ExtIO_Logging.h"
+#include "procitec_replacements.h"
 
 
 #define LENGTH_MASK 0x1FFF     // mask for message length
@@ -63,6 +62,24 @@ bool RFspaceNetSDRUdpData::bindIfc( const char * ifc, uint16_t portNo )
 
   resetReceiverData();
 
+  const uint32_t ipSend = CSimpleSocket::GetIPv4AddrInfoStatic(ifc);
+  if (!ipSend)
+  {
+    LOG_PRO(LOG_PROTOCOL, "Binding to all local interfaces without DATA_IP address '%s'", ifc);
+    ifc = "";
+  }
+  else
+  {
+    LOG_PRO(LOG_DEBUG, "Binding will be on %u.%u.%u.%u for '%s'"
+      , unsigned((ipSend >> 24) & 0xFF)
+      , unsigned((ipSend >> 16) & 0xFF)
+      , unsigned((ipSend >> 8) & 0xFF)
+      , unsigned(ipSend & 0xFF)
+      , ifc
+      );
+  }
+
+  LOG_PRO(LOG_DEBUG, "Binding UDP to interface %s:%u ..", ifc, unsigned(portNo));
   bool bConnected = mSocket.Bind(ifc, portNo);
   if ( bConnected )
   {
@@ -71,13 +88,15 @@ bool RFspaceNetSDRUdpData::bindIfc( const char * ifc, uint16_t portNo )
     uint32_t resWinSize = mSocket.SetReceiveWindowSize( paramWinSize );
     if ( resWinSize < paramWinSize )
     {
-      LOG_PRO( LOG_DEBUG, "Error setting UDP windows size to %u - result is %u", paramWinSize, resWinSize);
+      LOG_PRO(LOG_ERROR, "Error setting UDP windows size to %u - result is %u", paramWinSize, resWinSize);
     }
-
+  }
+  else
+  {
+    LOG_PRO(LOG_ERROR, "Error binding UDP to interface %s:%u", ifc, unsigned(portNo));
   }
 
   return bConnected;
-  return true;
 }
 
 

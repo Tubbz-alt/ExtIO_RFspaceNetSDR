@@ -1,12 +1,11 @@
 
 #include "rfspace_netsdr_control.h"
 
-#include "foreign/clsocket/clsocket/src/SimpleSocket.h"
+#include "ExtIO_Logging.h"
 
-#include "common/base/baselib/base/ProLogging.h"
-#include "common/base/baselib/base/ByteOrder.h"
-#include "common/base/baselib/base/ProMakros.h"
-#include "common/base/baselib/base/ProStd.h"
+#include "SimpleSocket.h"
+
+#include "procitec_replacements.h"
 
 #include <string.h>
 
@@ -357,7 +356,7 @@ void RFspaceNetSDRControl::requestHwFwVersions(HwFw id)
     return;
 
   const unsigned int len = 5;
-  const char acBuf[len] = { 5, 0x20, 4, 0, 0 };
+  char acBuf[len] = { 5, 0x20, 4, 0, 0 };
 
   WRITE_LITTLE_INT8( uint8_t(id) , &acBuf[4] );
 
@@ -406,7 +405,7 @@ void RFspaceNetSDRControl::requestRcvFrequency()
     return;
 
   const unsigned int len = 5;
-  const char acBuf[len] = { 5, char(msgType), 0x20, 0, 0};
+  char acBuf[len] = { 5, char(msgType), 0x20, 0, 0};
 
   WRITE_LITTLE_INT8( channel , &acBuf[4] );
 
@@ -419,7 +418,7 @@ void RFspaceNetSDRControl::requestRcvFrequencyRanges()
     return;
 
   const unsigned int len = 5;
-  const char acBuf[len] = { 5, char(MsgType::REQ_CTRL_RANGE), 0x20, 0, 0};
+  char acBuf[len] = { 5, char(MsgType::REQ_CTRL_RANGE), 0x20, 0, 0};
 
   WRITE_LITTLE_INT8( channel , &acBuf[4] );
 
@@ -432,7 +431,7 @@ void RFspaceNetSDRControl::requestRcvADAmplScale()
     return;
 
   const unsigned int len = 5;
-  const char acBuf[len] = { 5, char(msgType), 0x23, 0, 0};
+  char acBuf[len] = { 5, char(msgType), 0x23, 0, 0};
 
   WRITE_LITTLE_INT8( channel , &acBuf[4] );
 
@@ -445,7 +444,7 @@ void RFspaceNetSDRControl::requestRFGain()
     return;
 
   const unsigned int len = 5;
-  const char acBuf[len] = { 5, char(msgType), 0x38, 0, 0};
+  char acBuf[len] = { 5, char(msgType), 0x38, 0, 0};
 
   WRITE_LITTLE_INT8( channel , &acBuf[4] );
 
@@ -469,7 +468,7 @@ void RFspaceNetSDRControl::requestRFFilterSelection()
     return;
 
   const unsigned int len = 5;
-  const char acBuf[len] = { 5, char(msgType), 0x44, 0, 0};
+  char acBuf[len] = { 5, char(msgType), 0x44, 0, 0};
 
   WRITE_LITTLE_INT8( channel , &acBuf[4] );
 
@@ -483,7 +482,7 @@ void RFspaceNetSDRControl::requestADMode()
 
 
   const unsigned int len = 5;
-  const uint8_t acBuf[len] = { 5, uint8_t(msgType), 0x8A, 0, 0 };
+  uint8_t acBuf[len] = { 5, uint8_t(msgType), 0x8A, 0, 0 };
 
   WRITE_LITTLE_INT8( channel , &acBuf[4] );
 
@@ -497,7 +496,7 @@ void RFspaceNetSDRControl::requestUDPInterface()
 
 
   const unsigned int len = 5;
-  const uint8_t acBuf[len] = { 5, uint8_t(msgType), 0xC5, 0, 0 };
+  uint8_t acBuf[len] = { 5, uint8_t(msgType), 0xC5, 0, 0 };
 
   WRITE_LITTLE_INT8( channel , &acBuf[4] );
 
@@ -908,18 +907,33 @@ void RFspaceNetSDRControl::setUDPInterface ( const char * ip, uint16_t portNum )
   if ( mSocket.IsSocketInvalid() )
     return;
 
-  uint32_t ipSend =  inet_addr( ip );
+  const uint32_t ipSend =  CSimpleSocket::GetIPv4AddrInfoStatic(ip);
 
-  const unsigned int len = 10;
-  unsigned char acBuf[len] = { 0x0A, 0, 0xC5, 0, 0, 0, 0, 0, 0, 0 };
+  if (ipSend)
+  {
+    const unsigned int len = 10;
+    unsigned char acBuf[len] = { 0x0A, 0, 0xC5, 0, 0, 0, 0, 0, 0, 0 };
 
-  void * wp = &acBuf[4];
-  WRITE_BIG_INT32( ipSend, wp ); //BIG ENDIAN because ip and portNum already are little endian format
+    void * wp = &acBuf[4];
+    WRITE_BIG_INT32(ipSend, wp); //BIG ENDIAN because ip and portNum already are little endian format
 
-  wp = &acBuf[8];
-  WRITE_LITTLE_INT16( portNum, wp );
+    wp = &acBuf[8];
+    WRITE_LITTLE_INT16(portNum, wp);
 
-  mSocket.Send(acBuf, len);
+    mSocket.Send(acBuf, len);
+
+    LOG_PRO(LOG_DEBUG, "Commanded NetSDR to transmit it's UDP stream to %u.%u.%u.%u:%u"
+      , unsigned((ipSend >> 24) & 0xFF)
+      , unsigned((ipSend >> 16) & 0xFF)
+      , unsigned((ipSend >> 8) & 0xFF)
+      , unsigned(ipSend & 0xFF)
+      , unsigned(portNum)
+      );
+  }
+  else
+  {
+    LOG_PRO(LOG_PROTOCOL, "Skipping NetSDR command to transmit it's UDP stream towards ??? without DATA_IP address");
+  }
 }
 
 void RFspaceNetSDRControl::setCWStartup ( uint8_t wpm, CWFreq cwFreq, const char * asciiMessage)
@@ -927,14 +941,13 @@ void RFspaceNetSDRControl::setCWStartup ( uint8_t wpm, CWFreq cwFreq, const char
   if ( mSocket.IsSocketInvalid() )
     return;
 
-  int wpmMin = uint8_t(WpmMinMax::WPM_MIN);
-  int wpmMax = uint8_t(WpmMinMax::WPM_MAX);
-
+  uint8_t wpmMin = uint8_t(WpmMinMax::WPM_MIN);
+  uint8_t wpmMax = uint8_t(WpmMinMax::WPM_MAX);
 
   if( (wpm < wpmMin) || (wpm > wpmMax) )
   {
     wpm = PROCLIP(wpm, wpmMin, wpmMax);
-    LOG_PRO( LOG_ERROR,"WPM value out of bounds --> setting to value %u", wpm);
+    LOG_PRO( LOG_ERROR,"WPM value out of bounds --> setting to value %u", unsigned(wpm));
   }
 
   uint8_t length = strlen(asciiMessage);
@@ -1777,7 +1790,6 @@ const char * getText( RFspaceNetSDRControl::RfGain e )
 
 const char * getFilterText( int e )
 {
-
   switch(RFspaceNetSDRControl::RfFilterSel(e))
   {
     case RFspaceNetSDRControl::RfFilterSel::F_AUTO:               return "Auto Selection";
@@ -1863,7 +1875,4 @@ const char * getText( uint8_t e )
     default:  return "ERROR !";
   }
 }
-
-
-
 
