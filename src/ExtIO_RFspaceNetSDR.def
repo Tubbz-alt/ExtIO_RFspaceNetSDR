@@ -1,0 +1,53 @@
+
+LIBRARY      "ExtIO_RFspaceNetSDR"
+
+; Explicit exports
+EXPORTS
+
+  GetBuildInfo
+  GetExtIOVersion
+
+  InitHW
+  StartHW64
+  OpenHW
+  StartHW
+  StopHW
+  CloseHW
+  SetHWLO
+  SetHWLO64
+  GetStatus
+  SetCallback
+
+  GetHWLO
+  GetHWLO64
+  GetHWSR
+
+; VersionInfo
+
+  GetAttenuators
+  GetActualAttIdx
+  SetAttenuator
+
+; ExtIoGetAGCs
+; ExtIoGetActualAGCidx
+; ExtIoSetAGC
+; ExtIoShowMGC
+
+; ExtIoGetMGCs
+; ExtIoGetActualMgcIdx
+; ExtIoSetMGC
+
+  ExtIoGetSrates
+  ExtIoGetActualSrateIdx
+  ExtIoSetSrate
+  ExtIoGetBandwidth
+
+  ExtIoGetSetting
+  ExtIoSetSetting
+
+  ExtIoSDRInfo
+
+; Additional
+; MetaInfoByteOffset
+; PROCITECgetZeroDBFSInfo
+
