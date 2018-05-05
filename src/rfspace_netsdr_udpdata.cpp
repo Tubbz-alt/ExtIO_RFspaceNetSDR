@@ -108,7 +108,7 @@ bool RFspaceNetSDRUdpData::poll( )
 
   while (1)
   {
-     int rx = mSocket.Receive( MAX_UDP_LEN, &mRxBuffer[0] );
+    int rx = mSocket.Receive( MAX_UDP_LEN, &mRxBuffer[0] );
 
     if ( rx > 0 )
     {
@@ -122,20 +122,24 @@ bool RFspaceNetSDRUdpData::poll( )
     }
 
     return true;
-
   }
 }
 
 
 bool RFspaceNetSDRUdpData::processReceivedDataMessage(unsigned rxLen)
 {
-  if ( rxLen < 2 + 2 + 384 )
-    return false;
-
-  void * wp = &mRxBuffer[0];
+  const void * wp = &mRxBuffer[0];
   const uint16_t uControlItemCode = READ_LITTLE_INT16( wp );
   wp = &mRxBuffer[2];
   const uint16_t uSequenceNum = READ_LITTLE_INT16( wp );
+
+  if (rxLen < 2 + 2 + 384)
+  {
+    LOG_PRO(LOG_PROTOCOL, "received too small UDP packet of length %u with %s control item 0x%x"
+      , rxLen, (rxLen >= 2 ? "valid" : "invalid"), unsigned(uControlItemCode));
+    return false;
+  }
+
   bool bProcessed = true; // assume so
 
   if ( uSequenceNum != uExpectedSequenceNum )
@@ -228,6 +232,7 @@ bool RFspaceNetSDRUdpData::processReceivedDataMessage(unsigned rxLen)
       break;
 
     default:
+      LOG_PRO(LOG_PROTOCOL, "received UDP packet with unknown control item 0x%x length %u", unsigned(uControlItemCode), rxLen);
       bProcessed = false;
   }
 

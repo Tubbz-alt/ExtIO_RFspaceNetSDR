@@ -246,13 +246,11 @@ void RFspaceNetSDRControl::resetReceiverData()
     if(i<=4)
       mRcvFrequencyRanges[i] = 0;
   }
-
-
 }
 
 
 
-bool RFspaceNetSDRControl::connect( const char * ip, unsigned portNo )
+bool RFspaceNetSDRControl::connect(const char * ip, unsigned portNo, int nConnectTimeoutMillis)
 {
 
   if ( mSocket.IsSocketPeerOpen() )
@@ -270,13 +268,15 @@ bool RFspaceNetSDRControl::connect( const char * ip, unsigned portNo )
 
   resetReceiverData();
 
+  if (nConnectTimeoutMillis > 0)
+    mSocket.SetConnectTimeoutMillis(nConnectTimeoutMillis);
+
+  mSocket.SetNonblocking();
   bool bConnected = mSocket.Open( ip, portNo );
   if ( bConnected )
   {
-
-    mSocket.SetNonblocking();
-
     //request information about General Control at initial connection
+    mSocket.WaitUntilWritable(500);
     requestOptions();
     requestTargetName();
     requestTargetSerialNum();
@@ -284,7 +284,6 @@ bool RFspaceNetSDRControl::connect( const char * ip, unsigned portNo )
     requestHwFwVersions(RFspaceNetSDRControl::HwFw::BOOT_CODE);
     requestProductId();
     requestStatus();
-
   }
 
   return bConnected;
@@ -756,12 +755,12 @@ void RFspaceNetSDRControl::setRcvFreq( int64_t rcvFreqHz)
   if ( mSocket.IsSocketInvalid() )
     return;
 
-
   const unsigned int len = 10;
-  unsigned char acBuf[len] = { 0x0A, 0, 0x20, 0, 0, 0, 0, 0, 0, 0 };
+  //                             0     1    2     3    4    5
+  unsigned char acBuf[len+8] = { 0x0A, 0,   0x20, 0,   0,   0, 0, 0, 0, 0 };
   void * wp = &acBuf[4];
   WRITE_LITTLE_INT8( channel , wp ); //write channel information to byte #5
-  wp = &acBuf[len-5];
+  wp = &acBuf[5];
   WRITE_LITTLE_INT64( rcvFreqHz , wp ); //write frequency to last 5 bytes of buffer
 
   mSocket.Send(acBuf, len);
@@ -915,7 +914,7 @@ void RFspaceNetSDRControl::setUDPInterface ( const char * ip, uint16_t portNum )
     unsigned char acBuf[len] = { 0x0A, 0, 0xC5, 0, 0, 0, 0, 0, 0, 0 };
 
     void * wp = &acBuf[4];
-    WRITE_BIG_INT32(ipSend, wp); //BIG ENDIAN because ip and portNum already are little endian format
+    WRITE_LITTLE_INT32(ipSend, wp); // spec 4.4.6 writes "little endian"!
 
     wp = &acBuf[8];
     WRITE_LITTLE_INT16(portNum, wp);
@@ -1530,36 +1529,34 @@ void RFspaceNetSDRControl::parseVUHFGains( )
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //********************************** PRINT FUNCTIONS ********************************************
 
-void RFspaceNetSDRControl::printText( const Options & opt )
+void RFspaceNetSDRControl::printText(const Options & opt, const char * pacPreText)
 {
-  LOG_PRO( LOG_DEBUG, "Receiver Options Information : ");
-  LOG_PRO( LOG_DEBUG, "Sound Enabled :              %s ", opt.Sound_Enabled ? "Yes" : "No" );
-  LOG_PRO( LOG_DEBUG, "ReflockBoard Present :       %s ", opt.ReflockBoard_Present ? "Yes" : "No" );
-  LOG_PRO( LOG_DEBUG, "DownConverterBoard Present : %s ", opt.DownConverterBoard_Present ? "Yes" : "No" );
-  LOG_PRO( LOG_DEBUG, "UpConverterBoard Present :   %s ", opt.UpConverterBoard_Present ? "Yes" : "No" );
-  LOG_PRO( LOG_DEBUG, "X2Board Present :            %s ", opt.X2Board_Present ? "Yes" : "No" );
-  LOG_PRO( LOG_DEBUG, "MainBoardVariant :           %u ", opt.MainBoardVariant);
-  LOG_PRO( LOG_DEBUG, "ReflockBoardVariant :        %u ", opt.ReflockBoardVariant);
-  LOG_PRO( LOG_DEBUG, "DownConverterBoardVariant :  %u ", opt.DownConverterBoardVariant);
-  LOG_PRO( LOG_DEBUG, "UpConverterBoardVariant :    %u ", opt.UpConverterBoardVariant);
+  LOG_PRO(LOG_DEBUG, "%s Receiver Options Information :", pacPreText);
+  LOG_PRO( LOG_DEBUG, "  Sound Enabled :              %s", opt.Sound_Enabled ? "Yes" : "No" );
+  LOG_PRO( LOG_DEBUG, "  ReflockBoard Present :       %s", opt.ReflockBoard_Present ? "Yes" : "No" );
+  LOG_PRO( LOG_DEBUG, "  DownConverterBoard Present : %s", opt.DownConverterBoard_Present ? "Yes" : "No" );
+  LOG_PRO( LOG_DEBUG, "  UpConverterBoard Present :   %s", opt.UpConverterBoard_Present ? "Yes" : "No" );
+  LOG_PRO( LOG_DEBUG, "  X2Board Present :            %s", opt.X2Board_Present ? "Yes" : "No" );
+  LOG_PRO( LOG_DEBUG, "  MainBoardVariant :           %u", opt.MainBoardVariant);
+  LOG_PRO( LOG_DEBUG, "  ReflockBoardVariant :        %u", opt.ReflockBoardVariant);
+  LOG_PRO( LOG_DEBUG, "  DownConverterBoardVariant :  %u", opt.DownConverterBoardVariant);
+  LOG_PRO( LOG_DEBUG, "  UpConverterBoardVariant :    %u", opt.UpConverterBoardVariant);
 }
 
-void RFspaceNetSDRControl::printUDPStateText( const bool & state )
+void RFspaceNetSDRControl::printUDPStateText(const bool & state, const char * pacPreText)
 {
-  LOG_PRO( LOG_DEBUG, "UDP State Information : ");
-  LOG_PRO( LOG_DEBUG, "UDP State : %s", state ? "RUNNING" : "IDLE" );
+  LOG_PRO(LOG_DEBUG, "%s UDP State '%s'", pacPreText, state ? "RUNNING" : "IDLE");
 }
 
-void RFspaceNetSDRControl::printBitDepthText( const int & bitDepth )
+void RFspaceNetSDRControl::printBitDepthText(const int & bitDepth, const char * pacPreText)
 {
-  LOG_PRO( LOG_DEBUG, "UDP Bit Depth Information : ");
-  LOG_PRO( LOG_DEBUG, "UDP Bit Depth : %uBit ", bitDepth);
+  LOG_PRO(LOG_DEBUG, "%s UDP Bit Depth: %u Bit", pacPreText, bitDepth);
 }
 
 /*
-void RFspaceNetSDRControl::printText( const RcvFrequencies & rcvFreq)
+void RFspaceNetSDRControl::printText(const RcvFrequencies & rcvFreq, const char * pacPreText)
 {
-  LOG_PRO( LOG_DEBUG, "Receiver Frequency Information : ");
+  LOG_PRO( LOG_DEBUG, "%s Receiver Frequency Information : ", pacPreText);
   LOG_PRO( LOG_DEBUG, "Channel 1 NCO-Frequency  :                     %lu Hz", rcvFreq.Chn1_Freq );
   LOG_PRO( LOG_DEBUG, "Channel 2 NCO-Frequency  :                     %lu Hz", rcvFreq.Chn2_Freq );
   LOG_PRO( LOG_DEBUG, "****************************************************************************************** ");
@@ -1574,77 +1571,64 @@ void RFspaceNetSDRControl::printText( const RcvFrequencies & rcvFreq)
   LOG_PRO( LOG_DEBUG, "Range: Channel 2, Band 2 VCO- Frequency  :     %lu Hz", rcvFreq.Chn2_Bnd2_VCO_DwnConvFreq );
 }
 */
-void RFspaceNetSDRControl::printRcvFreqText( const uint64_t & rcvFreq)
+void RFspaceNetSDRControl::printRcvFreqText(const uint64_t & rcvFreq, const char * pacPreText)
 {
-  LOG_PRO( LOG_DEBUG, "Receiver Frequency Information :");
-  LOG_PRO( LOG_DEBUG, "Frequency:   %luHz", rcvFreq );
+  LOG_PRO(LOG_DEBUG, "%s Frequency: %lu Hz", pacPreText, (unsigned long)(rcvFreq));
 }
 
-void RFspaceNetSDRControl::printFilterText( const int & filtSel)
+void RFspaceNetSDRControl::printFilterText(const int & filtSel, const char * pacPreText)
 {
-  LOG_PRO( LOG_DEBUG, "RF FilterSelect Information : ");
-  LOG_PRO( LOG_DEBUG, "Filter Select:   %s", getFilterText(filtSel) );
+  LOG_PRO(LOG_DEBUG, "%s Filter Select: %s", pacPreText, getFilterText(filtSel));
 }
 
-void RFspaceNetSDRControl::printText( const bool & dithering)
+void RFspaceNetSDRControl::printText(const bool & dithering, const char * pacPreText)
 {
-  LOG_PRO( LOG_DEBUG, "AD Dither Information : ");
-  LOG_PRO( LOG_DEBUG, "Dithering:   %s", dithering ? "ON" : "OFF" );
+  LOG_PRO(LOG_DEBUG, "%s A/D Dithering: %s", pacPreText, dithering ? "ON" : "OFF");
 }
 
-void RFspaceNetSDRControl::printText( const float & gain)
+void RFspaceNetSDRControl::printText(const float & gain, const char * pacPreText)
 {
-  LOG_PRO( LOG_DEBUG, "AD Gain Information : ");
-  if(gain != -1)
-    LOG_PRO( LOG_DEBUG, "Gain:   %.1f", gain );
+  if (gain != -1)
+    LOG_PRO(LOG_DEBUG, "%s A/D Gain: %.1f", pacPreText, gain);
   else
-    LOG_PRO( LOG_ERROR, "ERROR! Passed invalid channel argument. Please choose < 1 > or < 2 > in the get function");
+    LOG_PRO(LOG_ERROR, "%s A/D Gain: ERROR!", pacPreText);
 }
 
-void RFspaceNetSDRControl::printText( const RfGain & gain )
+void RFspaceNetSDRControl::printText(const RfGain & gain, const char * pacPreText)
 {
-  {
-    LOG_PRO( LOG_DEBUG, "RF Gain Information :");
-    LOG_PRO( LOG_DEBUG, "RFGain:   %s", getText(gain) );
-  }
+  LOG_PRO(LOG_DEBUG, "%s RF Gain: %s", pacPreText, getText(gain));
 }
 
-void RFspaceNetSDRControl::printText( const VUHFGains & vuhfGains )
+void RFspaceNetSDRControl::printText(const VUHFGains & vuhfGains, const char * pacPreText)
 {
-  {
-    LOG_PRO( LOG_DEBUG, "VUHF Gain Information :");
-    LOG_PRO( LOG_DEBUG, "VUHF AutoMode:    %s", vuhfGains.isAGCMode ? "ON" : "OFF" );
-    LOG_PRO( LOG_DEBUG, "VUHF LNA Gain:    %u", vuhfGains.LNAGainLevel );
-    LOG_PRO( LOG_DEBUG, "VUHF Mix Gain:    %u", vuhfGains.MixerGainLevel );
-    LOG_PRO( LOG_DEBUG, "VUHF IF Gain:     %u", vuhfGains.IFOutputGainLevel );
-  }
+  LOG_PRO(LOG_DEBUG, "%s V/UHF Gain Information :", pacPreText);
+  LOG_PRO( LOG_DEBUG, "  V/UHF AutoMode: %s", vuhfGains.isAGCMode ? "ON" : "OFF" );
+  LOG_PRO( LOG_DEBUG, "  V/UHF LNA Gain: %u", vuhfGains.LNAGainLevel );
+  LOG_PRO( LOG_DEBUG, "  V/UHF Mix Gain: %u", vuhfGains.MixerGainLevel );
+  LOG_PRO( LOG_DEBUG, "  V/UHF IF Gain:  %u", vuhfGains.IFOutputGainLevel );
 }
 
-void RFspaceNetSDRControl::printText( const IQOutSmpRate & smpRate )
+void RFspaceNetSDRControl::printText(const IQOutSmpRate & smpRate, const char * pacPreText)
 {
-  LOG_PRO( LOG_DEBUG, "IQ Output Sample Rate Information :");
-  LOG_PRO( LOG_DEBUG, "IQ Output Sample Rate:   %s", getText(smpRate) );
+  LOG_PRO(LOG_DEBUG, "%s IQ Sample Rate: %u Hz", pacPreText, unsigned(smpRate));
 }
 
-void RFspaceNetSDRControl::printText( const UDPPacketSize & packetSize )
+void RFspaceNetSDRControl::printText(const UDPPacketSize & packetSize, const char * pacPreText)
 {
-  LOG_PRO( LOG_DEBUG, "IQ UDP Packet Size Information : ");
-  LOG_PRO( LOG_DEBUG, "UDP Packet Size:   %s", getText(packetSize) );
+  LOG_PRO(LOG_DEBUG, "%s UDP Packet Size: %s", pacPreText, getText(packetSize));
 }
 
-void RFspaceNetSDRControl::printUDPIPText( const char * ip )
+void RFspaceNetSDRControl::printUDPIPText(const char * ip, const char * pacPreText)
 {
-  LOG_PRO( LOG_DEBUG, "UDP IP Information : ");
-  LOG_PRO( LOG_DEBUG, "UDP IP : %s", ip);
+  LOG_PRO(LOG_DEBUG, "%s UDP IP : %s", pacPreText, ip);
 }
 
-void RFspaceNetSDRControl::printUDPPortNumText( const unsigned portNum )
+void RFspaceNetSDRControl::printUDPPortNumText(const unsigned portNum, const char * pacPreText)
 {
-  LOG_PRO( LOG_DEBUG, "UDP Port Number Information : ");
   LOG_PRO( LOG_DEBUG, "UDP Port Number : %u", portNum);
 }
 
-void RFspaceNetSDRControl::printText( const CWStartup & cwStartup)
+void RFspaceNetSDRControl::printText(const CWStartup & cwStartup, const char * pacPreText)
 {
 
   uint8_t len = sizeof(cwStartup.asciiMessage);
@@ -1658,12 +1642,10 @@ void RFspaceNetSDRControl::printText( const CWStartup & cwStartup)
   LOG_PRO( LOG_DEBUG, "CW wpm:         %u", cwStartup.cw_wpm);
   LOG_PRO( LOG_DEBUG, "CW Frequency:   %s", getText(cwStartup.eCwFreq));
   LOG_PRO( LOG_DEBUG, "CW Message:     '%s'", stringMessage.c_str());
-
 }
 
-void RFspaceNetSDRControl::printText( const uint8_t & chnMode)
+void RFspaceNetSDRControl::printText(const uint8_t & chnMode, const char * pacPreText)
 {
-  LOG_PRO( LOG_DEBUG, "Receiver Channel Setup Information : ");
   LOG_PRO( LOG_DEBUG, "Receiver Channel Setup:  %s", getText(chnMode));
 }
 
@@ -1816,25 +1798,6 @@ const char * getText( RFspaceNetSDRControl::ADGain e)
   {
     case RFspaceNetSDRControl::ADGain::ADGain_1:    return "GAIN 1";
     case RFspaceNetSDRControl::ADGain::ADGain_1_5:   return "GAIN 1.5";
-    default : return "ERROR";
-  }
-}
-
-const char * getText( RFspaceNetSDRControl::IQOutSmpRate e)
-{
-  switch (e)
-  {
-    case RFspaceNetSDRControl::IQOutSmpRate::SR_12_5kHz:  return "12.5 kHz";
-    case RFspaceNetSDRControl::IQOutSmpRate::SR_32kHz:    return "32 kHz";
-    case RFspaceNetSDRControl::IQOutSmpRate::SR_62_5kHz:  return "62.5 kHz";
-    case RFspaceNetSDRControl::IQOutSmpRate::SR_100kHz:   return "100 kHz";
-    case RFspaceNetSDRControl::IQOutSmpRate::SR_125kHz:   return "125 kHz";
-    case RFspaceNetSDRControl::IQOutSmpRate::SR_250kHz:   return "250 kHz";
-    case RFspaceNetSDRControl::IQOutSmpRate::SR_500kHz:   return "500 kHz";
-    case RFspaceNetSDRControl::IQOutSmpRate::SR_625kHz:   return "625 kHz";
-    case RFspaceNetSDRControl::IQOutSmpRate::SR_1000kHz:  return "1 MHz";
-    case RFspaceNetSDRControl::IQOutSmpRate::SR_1666kHz:  return "1.66 MHz";
-    case RFspaceNetSDRControl::IQOutSmpRate::SR_2000kHz:  return "2 MHz";
     default : return "ERROR";
   }
 }

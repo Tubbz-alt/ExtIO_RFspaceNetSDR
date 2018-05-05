@@ -1,6 +1,7 @@
 # ExtIO_RFspaceNetSDR
 Winrad/HDSDR plugin ExtIO for the RFspace NetSDR receiver
 
+URL: https://github.com/hayguen/ExtIO_RFspaceNetSDR
 
 ## Software Defined Radio (SDR) receiver
 
@@ -37,6 +38,16 @@ Other ExtIO compatible software like Winrad or Studio1 should also work.
 * copy downloaded file into your SDR software's installation directory (default=C:\Program Files (x86)\HDSDR).
 Do NOT try to unzip directly into this directory! Because of Windows' user rights management this will fail. Unzip somewhere else first, then copy it to the installation directory.
 
+* Edit one of config_Default-profile.reg (or config_NetSDR-profile.reg) with a Text-Editor,
+e.g. Notepad++. Enter your IP address(es) and check if you need to modify the portnumber.
+Use config_Default-profile.reg if you start HDSDR with it's installed shortcut.
+
+* With a custom 'NetSDR' profile,
+see https://sites.google.com/site/g4zfqradio/installing-and-using-hdsdr#Advanced ,
+you might edit config_NetSDR-profile.reg
+
+* Then doubleclick to import those settings, when HDSDR is closed
+
 * exit and restart SDR software and select ExtIO_RFspaceNetSDR.DLL if demanded
 
 
@@ -49,7 +60,7 @@ Besides cloning this repository, you also need to clone following libraries from
 * https://github.com/hayguen/clsocket  for tcp/ip socket communication
 
 Microsoft Visual Studio Express 2013 (MSVC) IDE is used for compilation.
-Other compiler should work, when adding suitable project files or fixing CMakeLists.txt.
+Other compilers (gcc/mingw) should work, when adding suitable project files or fixing CMakeLists.txt.
 
 
 ## Status
@@ -57,4 +68,7 @@ Other compiler should work, when adding suitable project files or fixing CMakeLi
 Compiles. In test.
 
 ExtIO control GUI for configuration is missing! To be implemented ..
+
+Workaround by editing Windows' registry directly with 'regedit.exe' for use with HDSDR.
+ Registry path: HKEY_CURRENT_USER\Software\HDSDR\ExtIO_RFspaceNetSDR.dll
 

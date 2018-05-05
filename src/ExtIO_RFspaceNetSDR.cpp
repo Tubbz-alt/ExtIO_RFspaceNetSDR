@@ -1,7 +1,7 @@
 
 #define HWNAME "RFspace"
 #define HWMODEL "RFspace NetSDR"
-#define SETTINGS_IDENTIFIER "RFspace NetSDR-0.2"
+#define SETTINGS_IDENTIFIER "RFspace NetSDR-0.5"
 
 #include "ExtIO_RFspaceNetSDR.h"
 #include "rfspace_netsdr_receiver.h"
@@ -275,15 +275,19 @@ bool EXTIO_CALL InitHW( char* name, char* model, int& type )
     gbInitHW = true;
   }
 
-
   return gbInitHW;
 }
 
 //---------------------------------------------------------------------------
-bool EXTIO_CALL OpenHW( void )
+bool EXTIO_CALL OpenHW(void)
 {
-  LOG_PRO( LOG_DEBUG, "OpenHW() called" );
+  LOG_PRO(LOG_DEBUG, "OpenHW() called .. returning gbInitHw = %s", (gbInitHW ? "true" : "false"));
+  return gbInitHW;  // open on demand!
+}
 
+//---------------------------------------------------------------------------
+static bool InternalOpenHW(void)
+{
   bool bOpenOK = true;
   if ( gbInitHW )
   {
@@ -298,6 +302,7 @@ bool EXTIO_CALL OpenHW( void )
       {
         gpoReceiver->setExtIoCallback(gpfnExtIOCallbackPtr);
         stopThread();
+        LOG_PRO(LOG_DEBUG, "InternalOpenHW(): trying to open/connect device ..");
         bOpenOK = gpoReceiver->openHW(gpoSettings);
         if (bOpenOK)
           startThread();
@@ -305,17 +310,18 @@ bool EXTIO_CALL OpenHW( void )
         {
           delete gpoReceiver;
           gpoReceiver = nullptr;
+
+#if defined( WIN32 ) || defined( WIN64 )
+          char acMsg[1024];
+          snprintf(acMsg, 1023, "Error connecting to %s:%u", gpoSettings->acCtrlIP, unsigned(gpoSettings->uCtrlPortNo));
+          ::MessageBoxA(0, acMsg, "Error", MB_OK);
+#endif
         }
+        LOG_PRO(LOG_DEBUG, "InternalOpenHW() returns gbInitHW && bOpenOK = %s && %s", (gbInitHW ? "true" : "false"), (bOpenOK ? "true" : "false"));
       }
     }
   }
 
-  //EXTIO_STATUS_CHANGE( gpfnExtIOCallbackPtr, extHw_Changed_ATT );
-
-  LOG_PRO( LOG_DEBUG, "OpenHW() returns gbInitHW && bOpenOK = %s && %s", (gbInitHW ? "true":"false"), (bOpenOK ? "true":"false") );
-
-  // in the above statement, F->handle is the window handle of the panel displayed
-  // by the DLL, if such a panel exists
   return gbInitHW && bOpenOK;
 }
 
@@ -330,6 +336,10 @@ int EXTIO_CALL StartHW( long LOfreq )
 int64_t EXTIO_CALL StartHW64( int64_t LOfreq )
 {
   LOG_PRO( LOG_DEBUG, "StartHW64() called" );
+
+  const bool bConnected = InternalOpenHW();
+  if (!bConnected && gpfnExtIOCallbackPtr)
+    EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, extHw_Stop);
 
   if ( !gbInitHW || !gpoReceiver )
     return 0;
@@ -427,12 +437,10 @@ long EXTIO_CALL GetHWLO( void )
 long EXTIO_CALL GetHWSR( void )
 {
   LOG_PRO( LOG_DEBUG, "GetHWSR() called");
-  if ( !gpoReceiver )
-    return 0;
   if (!gpoSettings)
     gpoSettings = new RFspaceNetReceiver::Settings();
   long srate = long(gpoSettings->uiSamplerate);
-  LOG_PRO( LOG_DEBUG, "GetHWSR(): %ld Hz", srate );
+  LOG_PRO(LOG_DEBUG, "GetHWSR(): %ld Hz", srate);
   return long(srate);
 }
 
@@ -574,7 +582,7 @@ int EXTIO_CALL ExtIoGetSrates( int srate_idx, double* samplerate )
 
 if( srate_idx >= 0 && srate_idx < RFspaceNetReceiver::miNumSamplerates)
     {
-      *samplerate = gpoReceiver->maiSamplerates[srate_idx];
+      *samplerate = RFspaceNetReceiver::srate_bws[srate_idx].srate;
       return 0;
     }
   else
@@ -595,10 +603,11 @@ int EXTIO_CALL ExtIoGetActualSrateIdx( void )
 int EXTIO_CALL ExtIoSetSrate( int srate_idx )
 {
   LOG_PRO( LOG_DEBUG, "************************************** ExtIoSetSrate(%d)*********************************", srate_idx);
+  int clippedIdx = PROCLIP(srate_idx, 0, RFspaceNetReceiver::miNumSamplerates - 1);
   if ( gpoReceiver )
   {
-    gpoReceiver->setSamplerate(srate_idx);
-    return 0;
+    gpoReceiver->setSamplerate(clippedIdx);
+    return (srate_idx == clippedIdx ? 0 : 1);
   }
   else
   {
@@ -606,8 +615,8 @@ int EXTIO_CALL ExtIoSetSrate( int srate_idx )
       gpoSettings = new RFspaceNetReceiver::Settings();
     LOG_PRO( LOG_DEBUG, "************************************** ExtIoSetSrate(): receiver does not exist. set settings *********************************");
 
-    gpoSettings->iSampleRateIdx = srate_idx;
-    return 1;
+    gpoSettings->iSampleRateIdx = clippedIdx;
+    return (srate_idx == clippedIdx ? 0 : 1);
   }
 }
 
@@ -616,7 +625,7 @@ long EXTIO_CALL ExtIoGetBandwidth( int srate_idx )
   long bandwidth;
   if( srate_idx >= 0 && srate_idx < RFspaceNetReceiver::miNumSamplerates)
   {
-    bandwidth = long(gpoReceiver->maiBandwidths[srate_idx]);
+    bandwidth = long(RFspaceNetReceiver::srate_bws[srate_idx].bw);
     return bandwidth;
   }
   else
@@ -630,6 +639,7 @@ enum class Setting {
       ID = 0      // enum values MUST be incremental without gaps!
     , CTRL_IP, CTRL_PORT    // NetSDR IP/Port
     , DATA_IP, DATA_PORT    // myPC Data IP/Port
+    , CONNECT_TIMEOUT_MILLIS
     , AVAIL_SRATES
     , AVAIL_BWS
     , SAMPLERATE_IDX
@@ -675,12 +685,17 @@ int EXTIO_CALL ExtIoGetSetting( int idx, char* description, char* value )
       return 0;
 
     case Setting::DATA_IP:
-      snprintf( description, 1024, "%s", "DATA_IP: IP-Address of Client PC to receive streaming data" );
+      snprintf( description, 1024, "%s", "DATA_IP: IP-Address of Client PC to receive streaming data - or leave empty. As checked 'Use Alternative Data Destination UDP Address' in SpectraVue" );
       snprintf( value, 1024, "%s", gpoSettings->acDataIP );
       return 0;
     case Setting::DATA_PORT:
       snprintf( description, 1024, "%s", "DATA PortNo: port number of Client PC to receive streaming data (default: as CONTROL PortNo)" );
       snprintf( value, 1024, "%d", gpoSettings->uDataPortNo );
+      return 0;
+
+    case Setting::CONNECT_TIMEOUT_MILLIS:
+      snprintf(description, 1024, "%s", "Connection timeout in milliseconds");
+      snprintf(value, 1024, "%d", gpoSettings->nConnectTimeoutMillis);
       return 0;
 
     case Setting::AVAIL_SRATES:
@@ -689,7 +704,7 @@ int EXTIO_CALL ExtIoGetSetting( int idx, char* description, char* value )
       value[0] = 0;
       for (k = 0; k < RFspaceNetReceiver::miNumSamplerates; ++k)
       {
-        int w = snprintf(value + off, 1024 - off, "%s%d: %u", (k == 0 ? "":", "), k, unsigned(RFspaceNetReceiver::maiSamplerates[k]) );
+        int w = snprintf(value + off, 1024 - off, "%s%d: %u", (k == 0 ? "" : ", "), k, unsigned(RFspaceNetReceiver::srate_bws[k].srate));
         if (w < 0 || w >= (1024 - int(off)))
           break;
         off += w;
@@ -702,7 +717,7 @@ int EXTIO_CALL ExtIoGetSetting( int idx, char* description, char* value )
       value[0] = 0;
       for (k = 0; k < RFspaceNetReceiver::miNumSamplerates; ++k)
       {
-        int w = snprintf(value + off, 1024 - off, "%s%d: %u", (k == 0 ? "" : ", "), k, unsigned(RFspaceNetReceiver::maiBandwidths[k]));
+        int w = snprintf(value + off, 1024 - off, "%s%d: %u", (k == 0 ? "" : ", "), k, unsigned(RFspaceNetReceiver::srate_bws[k].bw));
         if (w < 0 || w >= (1024 - int(off)))
           break;
         off += w;
@@ -760,7 +775,7 @@ int EXTIO_CALL ExtIoGetSetting( int idx, char* description, char* value )
        return 0;
 
     case Setting::GAIN_CONTROL_MODE:
-      snprintf( description, 1024, "%s", "Usage of AGC in VUHF Frequency Range" );
+      snprintf( description, 1024, "%s", "Usage of AGC in V/UHF Frequency Range" );
       snprintf( value, 1024, "%u", gpoSettings->bUseVUHFAutoMode);
       return 0;
 
@@ -778,6 +793,7 @@ int EXTIO_CALL ExtIoGetSetting( int idx, char* description, char* value )
       snprintf( description, 1024, "%s", "IF Output Gain Level Value" );
       snprintf( value, 1024, "%u", gpoSettings->iIFOutputValue);
       return 0;
+
     case Setting::NUM:
       // no break
     default:
@@ -813,7 +829,7 @@ static const char * trimmedIP(const char * value, const char * logText)
     if (j < 4)
     {
       if (value[0] == '.')
-        ++value;
+        acBuf[k++] = *value++;
       else
       {
         LOG_PRO(LOG_ERROR, "Error in %s for %d.th numeric block!", logText, j);
@@ -866,6 +882,9 @@ void EXTIO_CALL ExtIoSetSetting( int idx, const char* value )
       tempInt = atoi( value );
       gpoSettings->uDataPortNo = (uint16_t)( tempInt & 0xffff );
       break;
+    case Setting::CONNECT_TIMEOUT_MILLIS:
+      gpoSettings->nConnectTimeoutMillis = atoi(value);
+      break;
     case Setting::AVAIL_SRATES:
     case Setting::AVAIL_BWS:
       break;
@@ -908,13 +927,13 @@ void EXTIO_CALL ExtIoSetSetting( int idx, const char* value )
        break;*/
     case Setting::LNA_VALUE:
       gpoSettings->iLNAValue = atoi( value );
-       break;
+      break;
     case Setting::MIXER_VALUE:
       gpoSettings->iMixerValue = atoi( value );
-       break;
+      break;
     case Setting::IFOUTPUT_VALUE:
       gpoSettings->iIFOutputValue = atoi( value );
-       break;
+      break;
     case Setting::NUM:
       // no break
     default:

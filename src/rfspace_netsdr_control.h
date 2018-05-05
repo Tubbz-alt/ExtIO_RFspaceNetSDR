@@ -61,20 +61,33 @@ public:
   // 4.2.8 A/D Modes ***************
   enum class ADGain : uint8_t { ADGain_1_5 = 0x02, ADGain_1 = 0x00 };
 
+  // A/D Converter frequency = 80 MHz
+  static const uint32_t ADC_FREQ = 80 * 1000 * 1000;
 
   // 4.2.9I/Q Output Data Sample Rate ***************
+  // this enum has to be in sync with RFspaceNetReceiver::srate_bws[]
   enum class IQOutSmpRate : uint32_t {
-          SR_12_5kHz = 80*1000*1000/6400
-        , SR_32kHz = 80*1000*1000/2500
-        , SR_62_5kHz = 80*1000*1000/1280
-        , SR_100kHz = 80*1000*1000/800
-        , SR_125kHz = 80*1000*1000/640
-        , SR_250kHz = 80*1000*1000/320
-        , SR_500kHz = 80*1000*1000/160
-        , SR_625kHz = 80*1000*1000/128
-        , SR_1000kHz = 80*1000*1000/80
-        , SR_1666kHz = 80*1000*1000/48
-        , SR_2000kHz = 80*1000*1000/40
+          SR_12kHz    = ADC_FREQ / 6400
+        , SR_16kHz    = ADC_FREQ / 5000
+        , SR_32kHz    = ADC_FREQ / 2500
+        , SR_62kHz    = ADC_FREQ / 1280
+        , SR_80kHz    = ADC_FREQ / 1000
+        , SR_100kHz   = ADC_FREQ / 800
+        , SR_125kHz   = ADC_FREQ / 640
+        , SR_160kHz   = ADC_FREQ / 500
+        , SR_200kHz   = ADC_FREQ / 400
+        , SR_250kHz   = ADC_FREQ / 320
+        , SR_312kHz   = ADC_FREQ / 256
+        , SR_400kHz   = ADC_FREQ / 200
+        , SR_500kHz   = ADC_FREQ / 160
+        , SR_625kHz   = ADC_FREQ / 128
+        , SR_800kHz   = ADC_FREQ / 100
+        , SR_1000kHz  = ADC_FREQ / 80
+        , SR_1250kHz  = ADC_FREQ / 64
+        , SR_1538kHz  = ADC_FREQ / 52
+        , SR_1666kHz  = ADC_FREQ / 48
+        , SR_1818kHz  = ADC_FREQ / 44
+        , SR_2000kHz  = ADC_FREQ / 40
   };
 
   // 4.4.2 Data Output Packet Size ***************
@@ -94,7 +107,7 @@ public:
   RFspaceNetSDRControl(RFspaceNetSDRControl::CallbackIfc * pCB = nullptr);
   ~RFspaceNetSDRControl();
 
-  bool connect( const char * ip, unsigned portNo );
+  bool connect(const char * ip, unsigned portNo, int nConnectTimeoutMillis = -1 );
   bool close();
   bool connected() const;
 
@@ -158,23 +171,26 @@ public:
   const char * getRcvChannelSetupText( uint8_t setup ) const;
   const char * getRcvChannelText( uint8_t chn ) const;
 
-  // PRINT-TEXT FUNCTIONS
-  static void printText( const Options & );
-  static void printUDPStateText( const bool & );
-  static void printBitDepthText( const int & );
-  static void printRcvFreqText( const uint64_t & );
-  static void printFilterText( const int & );  // hätte man auch "PrintText" belassen können, da Datentyp int bisher einmalig
-  static void printText( const bool & );
-  static void printText( const float & );
-  static void printText( const IQOutSmpRate & );
-  static void printText( const UDPPacketSize & );
-  static void printText( const RfGain & );
-  static void printUDPIPText( const char * ip );
-  static void printUDPPortNumText( const unsigned );
-  static void printText( const CWStartup & );
-  static void printText( const uint8_t & );
-  static void printText( const VUHFGains &);
+private:
 
+  // PRINT-TEXT FUNCTIONS
+  static void printText(const Options &, const char * pacPreText = "received from device:");
+  static void printUDPStateText(const bool &, const char * pacPreText = "received from device:");
+  static void printBitDepthText(const int &, const char * pacPreText = "received from device:");
+  static void printRcvFreqText(const uint64_t &, const char * pacPreText = "received from device:");
+  static void printFilterText(const int &, const char * pacPreText = "received from device:");
+  static void printText(const bool &, const char * pacPreText = "received from device:");
+  static void printText(const float &, const char * pacPreText = "received from device:");
+  static void printText(const IQOutSmpRate &, const char * pacPreText = "received from device:");
+  static void printText(const UDPPacketSize &, const char * pacPreText = "received from device:");
+  static void printText(const RfGain &, const char * pacPreText = "received from device:");
+  static void printUDPIPText(const char * ip, const char * pacPreText = "received from device:");
+  static void printUDPPortNumText(const unsigned, const char * pacPreText = "received from device:");
+  static void printText(const CWStartup &, const char * pacPreText = "received from device:");
+  static void printText(const uint8_t &, const char * pacPreText = "received from device:");
+  static void printText(const VUHFGains &, const char * pacPreText = "received from device:");
+
+public:
 
   // STRUCT-DECLARATIONS
   //**************************************************************

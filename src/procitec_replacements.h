@@ -20,7 +20,7 @@
 #define STRINGIZEL(s) #s
 
 #define EXTIO_IFC_VER 2018
-#define EXTIO_VER_REV 0
+#define EXTIO_VER_REV 1
 #define SCM_TAGNAME ""
 #define SCM_DATE    ""
 
@@ -73,7 +73,7 @@ void WRITE_BIG_INT32(uint32_t v, void * vp)
   uint32_t flipped = ((v & 0xFFU) << 24)
     | ((v & 0xFF00U) << 8)
     | ((v & 0xFF0000U) >> 8)
-    | ((v & 0xFF000000U) >> 24);
+    | (((v & 0xFF000000U) >> 24) & 0xFFU);
   *tp = flipped;
 }
 
@@ -135,7 +135,7 @@ uint32_t READ_BIG_INT32(const void * vp)
   uint32_t flipped = ((v & 0xFFU) << 24)
     | ((v & 0xFF00U) << 8)
     | ((v & 0xFF0000U) >> 8)
-    | ((v & 0xFF000000U) >> 24);
+    | (((v & 0xFF000000U) >> 24) & 0xFFU);
   return flipped;
 }
 

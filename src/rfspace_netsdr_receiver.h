@@ -28,20 +28,20 @@ public:
     Settings()
     {
       strcpy(acCtrlIP, "192.168.8.101");  // "10.10.11.2"
-      strcpy(acDataIP, "192.168.8.100");  // ""   main PC: 192.168.8.100  PC2: 192.168.8.102
-      uCtrlPortNo = uDataPortNo = 50002;  // 50000
+      strcpy(acDataIP, "");               // ""   main PC: 192.168.8.100  PC2: 192.168.8.102
+      uCtrlPortNo = uDataPortNo = 50000;  // 50000  / 50002
       iSampleRateIdx = 2;                 // 2: 32 kHz samplerate
-      iAttenuationIdx = 0;
+      iAttenuationIdx = 6;                // 6: 0 dB  - no ATT  & no ADC Gain
 
       iBitDepthThresSamplerate = 1333333; // 1333.333 kHz == 80 MHz / 60
 
       iBand_minFreq = 0;
       iBand_maxFreq = 34 * 1000L * 1000L; // 0 - 34 MHz
 
-      uiBandwidth = 0;
-      uiSamplerate = 0;
+      uiBandwidth = 10000;
+      uiSamplerate = 12500;
       uiLastReportedSamplerate = 0;
-      iFrequency = 0;
+      iFrequency = 7 * 1000 * 1000;
       iLNAValue = 0;
       iMixerValue = 0;
       iIFOutputValue = 0;
@@ -54,7 +54,7 @@ public:
       bUseVUHFAutoMode = true;
       mfGainCompensationFactor = 1.0F;
 
-
+      nConnectTimeoutMillis = 1000;
     }
 
     char acCtrlIP[64];
@@ -92,10 +92,17 @@ public:
 
     float mfGainCompensationFactor;
 
+    int nConnectTimeoutMillis;
   };
 
-  static const uint32_t maiSamplerates[];
-  static const uint32_t maiBandwidths[];
+  static const struct srate_bw {
+    uint32_t  decim;
+    uint32_t  srate;
+    uint32_t  srateval;
+    uint32_t  bw;
+    const char * srateTxt;
+  } srate_bws[];
+
   static const int miNumSamplerates;
 
   static const float mafAttenuationATTs[];
