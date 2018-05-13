@@ -322,7 +322,6 @@ void RFspaceNetSDRControl::requestTargetName()
   const char acBuf[len] = { 4, msgType, 1, 0 };
 
   mSocket.Send(acBuf, len);
-
 }
 
 void RFspaceNetSDRControl::requestTargetSerialNum()
@@ -906,7 +905,7 @@ void RFspaceNetSDRControl::setUDPInterface ( const char * ip, uint16_t portNum )
   if ( mSocket.IsSocketInvalid() )
     return;
 
-  const uint32_t ipSend =  CSimpleSocket::GetIPv4AddrInfoStatic(ip);
+  const uint32_t ipSend = (ip && ip[0]) ? CSimpleSocket::GetIPv4AddrInfoStatic(ip) : 0;
 
   if (ipSend)
   {

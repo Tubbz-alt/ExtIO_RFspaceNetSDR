@@ -145,8 +145,7 @@ RFspaceNetReceiver::RFspaceNetReceiver()
   mControlPingTime = 0;
   mIsUDPRunning = false;
   mHasLostTCPConntection = false;
-  mOutBitSize = 0;
-  mHasVUHFFreqRange = false;
+  mHasVUHFFreqRange = true;
   mHasOptions = false;
 
   mStartUDPTimer = 0;
@@ -155,6 +154,7 @@ RFspaceNetReceiver::RFspaceNetReceiver()
   mChangeBitRangeSmpRateIdx = -1;
 
   mLastReportedBitDepth = extHw_SampleFormat_PCM16;
+  mLastReportedFmt = 0;
 
   mGainControlMode = GainControlMode::AUTO;
 }
@@ -171,22 +171,40 @@ void RFspaceNetReceiver::setExtIoCallback( pfnExtIOCallback ExtIOCallbackPtr )
 }
 
 
-void RFspaceNetReceiver::receiveRfspaceNetSDRUdpData( const int fmt, const void * voidpvRawSampleData, const int numIQFrames, const int bitsPerSample )
+void RFspaceNetReceiver::receiveRfspaceNetSDRUdpData(const unsigned fmt, const void * voidpvRawSampleData, const int numIQFrames, const bool bSequenceNumError)
 {
   mTimeWithoutDataInMilliseconds = 0;
-  if ( !mExtIOCallbackPtr )
+  if (!mExtIOCallbackPtr)
+  {
+    LOG_PRO(LOG_ERROR, "RFspaceNetReceiver::receiveRfspaceNetSDRUdpData(): mExtIOCallbackPtr == NULL");
     return;
+  }
+
+  if (mLastReportedFmt != fmt || bSequenceNumError)
+  {
+    mSampleBufferLenInFrames = 0;
+    if (!fmt || fmt > 4)
+      LOG_PRO(LOG_ERROR, "Received format %u of sample data from UDP is unknown!", mLastReportedFmt);
 
 #if NORMALIZE_DATA
-  if ( fmt == 1 )
-  {
-    if ( mLastReportedBitDepth != extHw_SampleFormat_FLT32 )
+    const int newSampleFormat = extHw_SampleFormat_FLT32;
+    const int newBitDepth = 32;
+#else
+    const int newSampleFormat = (fmt <= 2) ? extHw_SampleFormat_PCM16 : extHw_SampleFormat_PCM24;
+    const int newBitDepth = (fmt <= 2) ? (8 * sizeof(LITTLE_INT16_T)) : (8 * sizeof(LITTLE_INT24_T));
+#endif
+    if (mLastReportedBitDepth != newSampleFormat)
     {
-      EXTIO_STATUS_CHANGE(mExtIOCallbackPtr , extHw_SampleFormat_FLT32 );
-      mLastReportedBitDepth = extHw_SampleFormat_FLT32;
-      mSampleBufferLenInFrames = 0;
+      LOG_PRO(LOG_DEBUG, "SEND STATUS CHANGE OF %d BIT DATA TO SDR !", newBitDepth);
+      EXTIO_STATUS_CHANGE(mExtIOCallbackPtr, newSampleFormat);
+      mLastReportedBitDepth = newSampleFormat;
     }
+    mLastReportedFmt = fmt;
+  }
 
+#if NORMALIZE_DATA
+  if ( fmt <= 2 )
+  {
     const int16_t * puInputSamples = (const int16_t*)(voidpvRawSampleData);
     const float factor = mpoSettings->mfGainCompensationFactor;
     int srcFrameOffset = 0;
@@ -209,16 +227,8 @@ void RFspaceNetReceiver::receiveRfspaceNetSDRUdpData( const int fmt, const void 
       srcFrameOffset += numFramesToProcFromInput;
     }
   }
-  else if ( fmt == 3 ) // 24 bit
+  else if ( fmt <= 4 ) // 24 bit
   {
-    if ( mLastReportedBitDepth != extHw_SampleFormat_PCM24 )
-    {
-      EXTIO_STATUS_CHANGE(mExtIOCallbackPtr , extHw_SampleFormat_FLT32 );
-      mLastReportedBitDepth = extHw_SampleFormat_PCM24;
-      mSampleBufferLenInFrames = 0;
-      mOutBitSize = 8 * sizeof(LITTLE_INT24_T);
-    }
-
     const LITTLE_INT24_T * puInputSamples = reinterpret_cast< const LITTLE_INT24_T*>(voidpvRawSampleData);
     const float factor = mpoSettings->mfGainCompensationFactor;
 
@@ -245,17 +255,8 @@ void RFspaceNetReceiver::receiveRfspaceNetSDRUdpData( const int fmt, const void 
 
 #else
 
-  if ( fmt == 1 )
+  if ( fmt <= 2 )
   {
-    if ( mLastReportedBitDepth != extHw_SampleFormat_PCM16 )
-    {
-      LOG_PRO( LOG_DEBUG, "SEND STATUS CHANGE OF 16 BIT DATA TO SDR !" );
-      EXTIO_STATUS_CHANGE(mExtIOCallbackPtr , extHw_SampleFormat_PCM16 );
-      mLastReportedBitDepth = extHw_SampleFormat_PCM16;
-      mSampleBufferLenInFrames = 0;
-      mOutBitSize = 8 * sizeof(LITTLE_INT16_T);
-    }
-
     const int16_t * puInputSamples = (const int16_t*)(voidpvRawSampleData);
     int srcFrameOffset = 0;
 
@@ -265,15 +266,12 @@ void RFspaceNetReceiver::receiveRfspaceNetSDRUdpData( const int fmt, const void 
       if ( numFramesToProcFromInput > (EXT_BLOCKLEN - mSampleBufferLenInFrames) )  // buffer limit?
         numFramesToProcFromInput = (EXT_BLOCKLEN - mSampleBufferLenInFrames);
 
-      if(mHasOptions)
-        memcpy( &mSampleBuffer16[mSampleBufferLenInFrames*2], &puInputSamples[srcFrameOffset*2], numFramesToProcFromInput*2*sizeof(int16_t));
-      else
-        memset( &mSampleBuffer16[mSampleBufferLenInFrames*2], 0, numFramesToProcFromInput*2*sizeof(int16_t));
-
+      memcpy( &mSampleBuffer16[mSampleBufferLenInFrames*2], &puInputSamples[srcFrameOffset*2], numFramesToProcFromInput*2*sizeof(int16_t));
       mSampleBufferLenInFrames += numFramesToProcFromInput;
 
-      if ( mSampleBufferLenInFrames == EXT_BLOCKLEN )
+      if ( mSampleBufferLenInFrames >= EXT_BLOCKLEN )
       {
+        //LOG_PRO(LOG_DEBUG, "Callback %d smp of %d buffered", EXT_BLOCKLEN, mSampleBufferLenInFrames);
         mExtIOCallbackPtr( EXT_BLOCKLEN, 0, 0.0F, &mSampleBuffer16[0] );
         mSampleBufferLenInFrames = 0;
       }
@@ -281,18 +279,8 @@ void RFspaceNetReceiver::receiveRfspaceNetSDRUdpData( const int fmt, const void 
       srcFrameOffset += numFramesToProcFromInput;
     }
   }
-  else if ( fmt == 3 ) // 24 bit
+  else if ( fmt <= 4 ) // 24 bit
   {
-
-    if ( mLastReportedBitDepth != extHw_SampleFormat_PCM24 )
-    {
-      LOG_PRO( LOG_DEBUG, "SEND STATUS CHANGE OF 24 BIT DATA TO SDR !" );
-      EXTIO_STATUS_CHANGE(mExtIOCallbackPtr , extHw_SampleFormat_PCM24 );
-      mLastReportedBitDepth = extHw_SampleFormat_PCM24;
-      mSampleBufferLenInFrames = 0;
-      mOutBitSize = 8 * sizeof(LITTLE_INT24_T);
-    }
-
     const int8_t * puInputSamples = (const int8_t*)(voidpvRawSampleData);
     int srcFrameOffset = 0;
 
@@ -302,15 +290,12 @@ void RFspaceNetReceiver::receiveRfspaceNetSDRUdpData( const int fmt, const void 
       if ( numFramesToProcFromInput > (EXT_BLOCKLEN - mSampleBufferLenInFrames) )  // buffer limit?
         numFramesToProcFromInput = (EXT_BLOCKLEN - mSampleBufferLenInFrames);
 
-      if(mHasOptions)
-        memcpy( &mSampleBuffer24[mSampleBufferLenInFrames*2*3], &puInputSamples[srcFrameOffset*2*3], numFramesToProcFromInput*2*3);
-      else
-        memset( &mSampleBuffer24[mSampleBufferLenInFrames*2*3], 0, numFramesToProcFromInput*2*3);
-
+      memcpy( &mSampleBuffer24[mSampleBufferLenInFrames*2*3], &puInputSamples[srcFrameOffset*2*3], numFramesToProcFromInput*2*3);
       mSampleBufferLenInFrames += numFramesToProcFromInput;
 
-      if ( mSampleBufferLenInFrames == EXT_BLOCKLEN )
+      if ( mSampleBufferLenInFrames >= EXT_BLOCKLEN )
       {
+        //LOG_PRO(LOG_DEBUG, "Callback %d smp of %d buffered", EXT_BLOCKLEN, mSampleBufferLenInFrames);
         mExtIOCallbackPtr( EXT_BLOCKLEN, 0, 0.0F, &mSampleBuffer24[0] );
         mSampleBufferLenInFrames = 0;
       }
@@ -319,7 +304,6 @@ void RFspaceNetReceiver::receiveRfspaceNetSDRUdpData( const int fmt, const void 
     }
 
   }
-
 #endif
 
 }
@@ -610,6 +594,7 @@ bool RFspaceNetReceiver::startHW(int64_t LOfreq)
   if(!mpoSettings->bIsSocketBound)
   {
     //initial binding and start streaming
+    LOG_PRO(LOG_DEBUG, "Binding %s:%u for UDP data reception", mpoSettings->acDataIP, mpoSettings->uDataPortNo);
     bool bBindOK = udp.bindIfc( mpoSettings->acDataIP, mpoSettings->uDataPortNo );
     if ( !bBindOK )
     {
@@ -634,7 +619,7 @@ bool RFspaceNetReceiver::startHW(int64_t LOfreq)
   {
     //restart udp data (24bit/16bit) after "mStartUDPTimer" ms in "TimerProc" --> NetSDR sometimes streams wrong bitrate (although claiming it would stream the right bitrate).
     //--> give samplerate change (and sometimes therefore bitdepth change) more time.
-    mStartUDPTimer = 100; //in ms
+    mStartUDPTimer = 200; //in ms
     mStartData = true;
   }
 
@@ -645,16 +630,9 @@ bool RFspaceNetReceiver::startHW(int64_t LOfreq)
 void RFspaceNetReceiver::setHWLO( int64_t LOFreq )
 {
 
-  if(( (LOFreq >= VUHF_FREQUENCY) && !mHasVUHFFreqRange && mHasOptions) || !mHasOptions)
+  if( LOFreq >= VUHF_FREQUENCY && !mHasVUHFFreqRange && mHasOptions)
   {
-    if(!mHasOptions)
-    {
-      LOG_PRO( LOG_DEBUG, "**** RECEIVER OPTIONS NOT YET AVAILABLE --> SETTING FREQUENCY TO 10MHZ !");
-
-    }
-    else
-      LOG_PRO( LOG_ERROR, "**** RECEIVER SEEMS TO HAVE NO DOWNCONVERTER HARDWARE FOR VUHF FREQUENCY RANGE --> SETTING FREQUENCY TO 10MHZ !");
-
+    LOG_PRO( LOG_ERROR, "**** RECEIVER SEEMS TO HAVE NO DOWNCONVERTER HARDWARE FOR VUHF FREQUENCY RANGE --> SETTING FREQUENCY TO 10MHZ !");
     int64_t defaultFreq = 10*1000*1000;
     rcv.setRcvFreq( defaultFreq );
     mpoSettings->iFrequency = defaultFreq;

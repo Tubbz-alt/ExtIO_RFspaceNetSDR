@@ -126,7 +126,7 @@ public:
 
   void setExtIoCallback( pfnExtIOCallback ExtIOCallbackPtr );
 
-  void receiveRfspaceNetSDRUdpData( const int fmt, const void * pvRawSampleData, const int numIQFrames, const int bitsPerSample ) override;
+  void receiveRfspaceNetSDRUdpData(const unsigned fmt, const void * pvRawSampleData, const int numIQFrames, const bool bSequenceNumError) override;
   void receiveRFspaceNetSDRControlInfo(Info info) override;
 
   void normalizeData(float *);
@@ -192,11 +192,11 @@ private:
   bool mIsUDPRunning;
   uint16_t mNumCallbacks = 0;
   bool mHasLostTCPConntection;
-  uint8_t mOutBitSize;
   bool mHasVUHFFreqRange;
   bool mHasOptions;
 
   int mLastReportedBitDepth;
+  unsigned mLastReportedFmt;
 
   volatile int mStartUDPTimer;
   volatile bool mStartData;

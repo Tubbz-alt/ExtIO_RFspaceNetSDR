@@ -5,12 +5,6 @@
 #include "procitec_replacements.h"
 
 
-#define LENGTH_MASK 0x1FFF     // mask for message length
-#define TYPE_MASK 0xE0         // mask for upper byte of header
-#define PRINT_RECEIVED_DATA   0
-#define PRINT_RECEIVED_TYPE   0
-
-
 RFspaceNetSDRUdpData::RFspaceNetSDRUdpData( RFspaceNetSDRUdpData::CallbackIfc * pCB )
 : mpSocket( new CPassiveSocket( CPassiveSocket::SocketTypeUdp ) )
 , mSocket( *mpSocket )
@@ -18,8 +12,6 @@ RFspaceNetSDRUdpData::RFspaceNetSDRUdpData( RFspaceNetSDRUdpData::CallbackIfc * 
 {
   resetReceiverData();
   mSocket.Initialize();
-
-  //mMemoryMatrixRow = 0;
 }
 
 
@@ -36,7 +28,8 @@ RFspaceNetSDRUdpData::~RFspaceNetSDRUdpData()
 
 void RFspaceNetSDRUdpData::resetReceiverData()
 {
-  uExpectedSequenceNum = 0;
+  muLastControlItemCode = 0xFFFFU;
+  muExpectedSequenceNum = 0;
 }
 
 
@@ -62,7 +55,7 @@ bool RFspaceNetSDRUdpData::bindIfc( const char * ifc, uint16_t portNo )
 
   resetReceiverData();
 
-  const uint32_t ipSend = CSimpleSocket::GetIPv4AddrInfoStatic(ifc);
+  const uint32_t ipSend = (ifc && ifc[0]) ? CSimpleSocket::GetIPv4AddrInfoStatic(ifc) : 0;
   if (!ipSend)
   {
     LOG_PRO(LOG_PROTOCOL, "Binding to all local interfaces without DATA_IP address '%s'", ifc);
@@ -108,11 +101,11 @@ bool RFspaceNetSDRUdpData::poll( )
 
   while (1)
   {
-    int rx = mSocket.Receive( MAX_UDP_LEN, &mRxBuffer[0] );
+    int rxLen = mSocket.Receive(MAX_UDP_LEN, &mRxBuffer[0]);
 
-    if ( rx > 0 )
+    if (rxLen > 0)
     {
-      processReceivedDataMessage(rx);
+      processReceivedDataMessage(rxLen);
       continue;
     }
     else if ( mSocket.IsSocketInvalid() )
@@ -126,116 +119,45 @@ bool RFspaceNetSDRUdpData::poll( )
 }
 
 
-bool RFspaceNetSDRUdpData::processReceivedDataMessage(unsigned rxLen)
+void RFspaceNetSDRUdpData::processReceivedDataMessage(int rxLen)
 {
   const void * wp = &mRxBuffer[0];
   const uint16_t uControlItemCode = READ_LITTLE_INT16( wp );
   wp = &mRxBuffer[2];
   const uint16_t uSequenceNum = READ_LITTLE_INT16( wp );
 
-  if (rxLen < 2 + 2 + 384)
+  const bool bSequenceNumError = (uSequenceNum != muExpectedSequenceNum);
+  if (bSequenceNumError)
+    LOG_PRO(LOG_PROTOCOL, "received %d bytes, sequenceNum %u - expected %u with control item code 0x%x"
+      , rxLen, unsigned(uSequenceNum), unsigned(muExpectedSequenceNum), uControlItemCode);
+  muExpectedSequenceNum = uSequenceNum + 1;
+  if ( !muExpectedSequenceNum )
+    ++muExpectedSequenceNum;
+
+#define RXLEN_VALID(N)  ( (rxLen == 4 + N) ? "Valid" : "Invalid" )
+  const bool bChangedControlItem = (muLastControlItemCode != uControlItemCode);
+  muLastControlItemCode = uControlItemCode;
+  if (bChangedControlItem)
   {
-    LOG_PRO(LOG_PROTOCOL, "received too small UDP packet of length %u with %s control item 0x%x"
-      , rxLen, (rxLen >= 2 ? "valid" : "invalid"), unsigned(uControlItemCode));
-    return false;
+    switch (uControlItemCode)
+    {
+    case 0x8404:  LOG_PRO(LOG_DEBUG, "received UDP: 16 Bit I/Q. %s Large MTU size %d bytes", RXLEN_VALID(1024), rxLen); break;
+    case 0x8204:  LOG_PRO(LOG_DEBUG, "received UDP: 16 Bit I/Q. %s Small MTU size %d bytes", RXLEN_VALID(512), rxLen);  break;
+    case 0x85A4:  LOG_PRO(LOG_DEBUG, "received UDP: 24 Bit I/Q. %s Large MTU size %d bytes", RXLEN_VALID(1440), rxLen); break;
+    case 0x8184:  LOG_PRO(LOG_DEBUG, "received UDP: 24 Bit I/Q. %s Small MTU size %d bytes", RXLEN_VALID(384), rxLen);  break;
+    default:  LOG_PRO(LOG_PROTOCOL, "received UDP packet with unknown control item 0x%x size %d bytes", unsigned(uControlItemCode), rxLen);
+    }
   }
 
-  bool bProcessed = true; // assume so
-
-  if ( uSequenceNum != uExpectedSequenceNum )
-  {
-    LOG_PRO( LOG_DEBUG, "received 0x%x as control Item Code [16Bit --> 0x8404 || 24Bit --> 0x85A4]", uControlItemCode);
-    LOG_PRO( LOG_DEBUG, "received %d bytes, sequenceNum %u - expected %u", rxLen, unsigned(uSequenceNum), unsigned(uExpectedSequenceNum) );
-  }
-  uExpectedSequenceNum = uSequenceNum + 1;
-  if ( !uExpectedSequenceNum )
-    ++uExpectedSequenceNum;
-
-/*  mpaSecNum[uSequenceNum] = &mUDPMemoryMatrix[0][mMemoryMatrixRow]; // Pointer[uSequenceNum] zeigt auf entsprechenden UDP-Burst
-  memcpy( &mUDPMemoryMatrix[0][mMemoryMatrixRow++], &mRxBuffer[0], rxLen); // Daten werden in Speicher-Array geschrieben
-
-  if(mMemoryMatrixRow >= UDP_MEMORY_SIZE)
-    mMemoryMatrixRow = 0;*/
-
-
-#if PRINT_RECEIVED_DATA
-  {
-    LOG_PRO( LOG_DEBUG, "received %d bytes, sequenceNum %u", rxLen, unsigned(uSequenceNum) );
-    //for ( unsigned i = 0; i < 4 ; ++i )
-    for ( unsigned i = 4; i < rxLen ; ++i )
-      if ( mRxBuffer[i] )
-        LOG_PRO( LOG_DEBUG, "%d: 0x%x", i, unsigned(mRxBuffer[i]) );
-  }
-#endif
-
+  const void * p = reinterpret_cast<const void *>(&mRxBuffer[4]);
   switch ( uControlItemCode )
   {
-    case 0x8404:  // 4.5.1.1 Real 16 Bit FIFO Data
-    //case 0x8404:  // 4.5.1.2 Complex 16 Bit Data
-      if ( rxLen == 4 + 1024 )
-      {
-#if PRINT_RECEIVED_TYPE
-        LOG_PRO( LOG_DEBUG, "4.5.1.2 Complex 16 Bit Data" );
-#endif
-        const int16_t * p = reinterpret_cast< const int16_t * >( &mRxBuffer[4] );
-        const int numIQpairs = 1024 / 4;  // I/Q - Paare
-        if ( mpCallBack )
-          mpCallBack->receiveRfspaceNetSDRUdpData( 1, p, numIQpairs, 16 );
-      }
-      else
-        bProcessed = false;
-      break;
-    case 0x8204:  // 4.5.1.1 Real 16 Bit FIFO Data Small MTU
-    //case 0x8204:  // 4.5.1.2 Complex 16 Bit Data Small MTU
-      if ( rxLen == 4 + 512 )
-      {
-#if PRINT_RECEIVED_TYPE
-        LOG_PRO( LOG_DEBUG, "4.5.1.2 Complex 16 Bit Data Small MTU" );
-#endif
-        const int16_t * p = reinterpret_cast< const int16_t * >( &mRxBuffer[4] );
-        const int numIQpairs = 512 / 4;  // I/Q - Paare
-
-        if ( mpCallBack )
-          mpCallBack->receiveRfspaceNetSDRUdpData( 2, p, numIQpairs, 16 );
-      }
-      else
-        bProcessed = false;
-      break;
-
-    case 0x85A4:  // 4.5.1.3 Complex 24 Bit Data
-      if ( rxLen == 4 + 1440 )
-      {
-#if PRINT_RECEIVED_TYPE
-        LOG_PRO( LOG_DEBUG, "4.5.1.3 Complex 24 Bit Data" );
-#endif
-        const void * p = reinterpret_cast< const void * >( &mRxBuffer[4] );
-        const int numIQpairs = 1440 / 6;  // I/Q - Paare
-        if ( mpCallBack )
-          mpCallBack->receiveRfspaceNetSDRUdpData( 3, p, numIQpairs, 24 );
-      }
-      else
-        bProcessed = false;
-      break;
-    case 0x8184:  // 4.5.1.3 Complex 24 Bit Data Small MTU
-      if ( rxLen == 4 + 384 )
-      {
-#if PRINT_RECEIVED_TYPE
-        LOG_PRO( LOG_DEBUG, "4.5.1.3 Complex 24 Bit Data Small MTU" );
-#endif
-        const void * p = reinterpret_cast< const void * >( &mRxBuffer[4] );
-        const int numIQpairs = 384 / 6; // I/Q - Paare
-        if ( mpCallBack )
-          mpCallBack->receiveRfspaceNetSDRUdpData( 3, p, numIQpairs, 24 );
-      }
-      else
-        bProcessed = false;
-      break;
-
-    default:
-      LOG_PRO(LOG_PROTOCOL, "received UDP packet with unknown control item 0x%x length %u", unsigned(uControlItemCode), rxLen);
-      bProcessed = false;
+  case 0x8404:  mpCallBack->receiveRfspaceNetSDRUdpData(1, p, 1024 /4, bSequenceNumError);  break;
+  case 0x8204:  mpCallBack->receiveRfspaceNetSDRUdpData(2, p, 512 /4, bSequenceNumError);   break;
+  case 0x85A4:  mpCallBack->receiveRfspaceNetSDRUdpData(3, p, 1440 /6, bSequenceNumError);  break;
+  case 0x8184:  mpCallBack->receiveRfspaceNetSDRUdpData(4, p, 384 /6, bSequenceNumError);   break;
+  default: ;
   }
 
-  return bProcessed;
 }
 
