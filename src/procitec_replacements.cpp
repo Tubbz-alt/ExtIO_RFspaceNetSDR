@@ -1,11 +1,12 @@
 
 #include "procitec_replacements.h"
 
-#ifndef _WINSOCK2API_
-#define _WINSOCK2API_
-#define _WINSOCKAPI_
-#endif
-#include <Windows.h>
+#ifdef WIN32
+  #ifndef _WINSOCK2API_
+  #define _WINSOCK2API_
+  #define _WINSOCKAPI_
+  #endif
+  #include <Windows.h>
 
 uint64_t currentMSecsSinceEpoch()
 {
@@ -33,3 +34,17 @@ uint64_t currentMSecsSinceEpoch()
   return ret;
 }
 
+#else
+
+#include <sys/time.h>
+
+uint64_t currentMSecsSinceEpoch()
+{
+    struct timeval te;
+    gettimeofday(&te, 0); // get current time
+    uint64_t milliseconds = te.tv_sec*1000LL + te.tv_usec/1000; // calculate milliseconds
+    // printf("milliseconds: %lld\n", milliseconds);
+    return milliseconds;
+}
+
+#endif

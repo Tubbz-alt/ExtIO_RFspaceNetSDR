@@ -99,100 +99,6 @@ static void ReceiverThreadProc( void* lpParameter )
   }
   gbExitControlThread    = false;
   gbControlThreadRunning = false;
-  return;
-
-  bool bProtocolOrTimeoutError = false;
-  while ( !gbExitControlThread )
-  {
-    //if ( !gbBoundTcpDataPort )
-    {
-      // wait until TCP data port is bound, when using TCP protocol
-      tthread::this_thread::sleep_for( tthread::chrono::milliseconds( 10 ) );
-      gpoReceiver->TimerProc(uiWaitMs);
-      continue;
-    }
-    if ( bProtocolOrTimeoutError )
-    {
-      // wait with reconnect .. until NetSDR might get ready!
-      LOG_PRO( LOG_PROTOCOL, "ControlThreadProc(): waiting 10 seconds before reconnecting to RFspace NetSDR");
-      tthread::this_thread::sleep_for( tthread::chrono::milliseconds( 10000 ) );
-      bProtocolOrTimeoutError = false;
-    }
-
-    uint64_t lastStrmCheck = currentMSecsSinceEpoch();
-    uint64_t lastRcvCheck = currentMSecsSinceEpoch();
-
-    // pre-processing
-    if ( true )
-    {
-      LOG_PRO( LOG_NORMAL, "ControlThreadProc(): established = OK" );
-
-      while ( 1 )
-      {
-        LOG_PRO( LOG_NORMAL, "ControlThreadProc()" );
-
-        LOG_PRO( LOG_NORMAL, "ControlThreadProc(): controlling to frq %.1f kHz with BW %.1f kHz with ATT %d dB"
-                 , gpoSettings->iFrequency / 1000.0
-                 , gpoSettings->uiBandwidth / 1000.0
-                 , giRcvMGC
-                 );
-      }
-
-      // restart
-      gbDataStreamTimeout = false;
-
-      break;
-    }
-
-    if ( !bProtocolOrTimeoutError )
-    {
-      LOG_PRO( LOG_NORMAL, "ControlThreadProc(): was STREAM ACTIVATED! Data reception can start. DataPort is %s"
-                 , ( gbBoundTcpDataPort ? "bound" : "unbound" ) );
-        gbDataStreamActivated = true;
-
-      giLastRcvFreq = 0;  // oConn.getLastReceiverFreq();
-      giLastRcvBW = 0;    // oConn.getLastReceiverBW();
-      gbHaveLastRcvFreqAndBW = ( giLastRcvBW > 0 );
-      if ( giLastRcvBW <= 0 )
-      {
-        LOG_PRO( LOG_PROTOCOL, "ControlThreadProc(): received ReceiverBandWidth <= 0!" );
-      }
-    }
-
-    // processing
-    {
-      bool bExitProcLoop = bProtocolOrTimeoutError;
-      while ( !gbExitControlThread && !bExitProcLoop )
-      {
-        uint64_t uiCurr = currentMSecsSinceEpoch();
-        if ( ( uiCurr - lastStrmCheck ) >= 2000 )
-        {
-          //oConn.requestStreamState();
-          lastStrmCheck = uiCurr;
-        }
-        if ( ( uiCurr - lastRcvCheck ) >= 5000 )
-        {
-
-          lastRcvCheck = uiCurr;
-        }
-        if ( gbDataStreamTimeout )
-        {
-          gbDataStreamTimeout = false;
-          LOG_PRO( LOG_NORMAL, "ControlThreadProc(): STREAM TIMEOUT! Restarting .. " );
-          lastStrmCheck = uiCurr;
-        }
-      }
-    }
-
-    // post-processing
-
-    if ( gbExitControlThread )
-      break;
-    tthread::this_thread::sleep_for( tthread::chrono::milliseconds( 1000 ) );
-  }
-
-  gbExitControlThread    = false;
-  gbControlThreadRunning = false;
 }
 
 
@@ -348,6 +254,14 @@ int64_t EXTIO_CALL StartHW64( int64_t LOfreq )
 
   LOG_PRO( LOG_DEBUG, "StartHW64(): %s", (bStartOK ? "successful":"failed") );
 
+  if (0)
+  {
+    int sampleFmt = gpoReceiver->getExtHwSampleFormat();
+    int bitDepth = gpoReceiver->getExtHwBitDepth();
+    LOG_PRO(LOG_PROTOCOL, "SEND STATUS CHANGE AT START TO SDR: NEW BIT DEPTH %d Bit.", bitDepth);
+    EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, sampleFmt);
+  }
+
   // number of complex elements returned each
   // invocation of the callback routine
   return RFspaceNetReceiver::EXT_BLOCKLEN;
@@ -386,11 +300,11 @@ int EXTIO_CALL SetHWLO( long LOfreq )
 
 int64_t EXTIO_CALL SetHWLO64( int64_t LOfreq )
 {
-  LOG_PRO( LOG_DEBUG, "************************************** SetHWLO(%d) *********************************", LOfreq);
+  LOG_PRO( LOG_DEBUG, "************************************** SetHWLO(%ld) *********************************", long(LOfreq));
   LOG_PRO( LOG_DEBUG, "SetHWLO64(%ld Hz) called", long(LOfreq) );
   if ( !gpoReceiver )
   {
-    LOG_PRO( LOG_DEBUG, "SetHWLO64(): ERROR: No Receiver", LOfreq);
+    LOG_PRO( LOG_DEBUG, "SetHWLO64(): ERROR: No Receiver");
     return 1; // Error
   }
   gpoReceiver->setHWLO(LOfreq);

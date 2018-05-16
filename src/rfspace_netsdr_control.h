@@ -105,6 +105,7 @@ public:
 
 
   RFspaceNetSDRControl(RFspaceNetSDRControl::CallbackIfc * pCB = nullptr);
+  RFspaceNetSDRControl(CSimpleSocket * pSocket, RFspaceNetSDRControl::CallbackIfc * pCB = nullptr);
   ~RFspaceNetSDRControl();
 
   bool connect(const char * ip, unsigned portNo, int nConnectTimeoutMillis = -1 );
@@ -488,7 +489,5 @@ const char * getText( RFspaceNetSDRControl::IQOutSmpRate );
 const char * getText( RFspaceNetSDRControl::UDPPacketSize );
 const char * getText( RFspaceNetSDRControl::CWFreq );
 const char * getText( uint8_t chnSetup );
-
-
-
+const char * getText( RFspaceNetSDRControl::CallbackIfc::Info);
 

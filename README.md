@@ -9,7 +9,8 @@ The hardware receiver was manufactured by RFspace.
 
 See http://www.rfspace.com/
 
-This software is dedicated only for the NetSDR model, which is out-of-production - NOT the 'plus' model.
+This software was initially developed for for the NetSDR model.
+It does also run with the NetSDR+.
 
 Network protocol specification for the interface is available at
 http://www.moetronix.com/svdownload.htm

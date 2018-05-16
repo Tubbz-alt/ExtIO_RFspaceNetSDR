@@ -7,6 +7,7 @@
 #include <cstring>
 #include <assert.h>
 
+
 // from NetSDR specification:
 //   This parameter limited to frequencies that are integer divisions by 4 of the 80MHz A/D sample rate
 //   The maximum sample rate supported is 2,000,000 Hz in the 16 bits/sample mode.(80MHz/40)
@@ -151,12 +152,18 @@ RFspaceNetReceiver::RFspaceNetReceiver()
   mStartUDPTimer = 0;
   mStartData = false;
 
-  mChangeBitRangeSmpRateIdx = -1;
-
-  mLastReportedBitDepth = extHw_SampleFormat_PCM16;
   mLastReportedFmt = 0;
 
   mGainControlMode = GainControlMode::AUTO;
+
+  mNetSdrBitDepth = 16;
+#if NORMALIZE_DATA
+  mLastReportedSampleFormat = mExtHwSampleFormat = extHw_SampleFormat_FLT32;
+  mExtHwBitDepth = 32;
+#else
+  mLastReportedSampleFormat = mExtHwSampleFormat = (mNetSdrBitDepth == 24) ? extHw_SampleFormat_PCM24 : extHw_SampleFormat_PCM16;
+  mExtHwBitDepth = (mNetSdrBitDepth == 24) ? 24 : 16;
+#endif
 }
 
 RFspaceNetReceiver::~RFspaceNetReceiver()
@@ -186,19 +193,21 @@ void RFspaceNetReceiver::receiveRfspaceNetSDRUdpData(const unsigned fmt, const v
     if (!fmt || fmt > 4)
       LOG_PRO(LOG_ERROR, "Received format %u of sample data from UDP is unknown!", mLastReportedFmt);
 
+    mNetSdrBitDepth = (fmt <= 2) ? 16 : 24;
 #if NORMALIZE_DATA
-    const int newSampleFormat = extHw_SampleFormat_FLT32;
-    const int newBitDepth = 32;
+    mExtHwSampleFormat = extHw_SampleFormat_FLT32;
+    mExtHwBitDepth = 32;
 #else
-    const int newSampleFormat = (fmt <= 2) ? extHw_SampleFormat_PCM16 : extHw_SampleFormat_PCM24;
-    const int newBitDepth = (fmt <= 2) ? (8 * sizeof(LITTLE_INT16_T)) : (8 * sizeof(LITTLE_INT24_T));
+    mExtHwSampleFormat = (mNetSdrBitDepth == 24) ? extHw_SampleFormat_PCM24 : extHw_SampleFormat_PCM16;
+    mExtHwBitDepth = (mNetSdrBitDepth == 24) ? 24 : 16;
 #endif
-    if (mLastReportedBitDepth != newSampleFormat)
+    if (mLastReportedSampleFormat != mExtHwSampleFormat)
     {
-      LOG_PRO(LOG_DEBUG, "SEND STATUS CHANGE OF %d BIT DATA TO SDR !", newBitDepth);
-      EXTIO_STATUS_CHANGE(mExtIOCallbackPtr, newSampleFormat);
-      mLastReportedBitDepth = newSampleFormat;
+      LOG_PRO(LOG_ERROR, "SEND STATUS CHANGE TO SDR: NEW BIT DEPTH %d Bit. while running => ERROR!.", mExtHwBitDepth);
+      EXTIO_STATUS_CHANGE(mExtIOCallbackPtr, mExtHwSampleFormat);
+      mLastReportedSampleFormat = mExtHwSampleFormat;
     }
+
     mLastReportedFmt = fmt;
   }
 
@@ -323,14 +332,14 @@ void RFspaceNetReceiver::receiveRFspaceNetSDRControlInfo(Info info)
         if(actualFrequency != mpoSettings->iFrequency || mHasDifferentLOFrequency)
         {
           mpoSettings->iFrequency = actualFrequency;
-          LOG_PRO( LOG_ERROR, " RECEIVED CALLBACK WITH UNEXPECTED FREQUENCY : %d Hz ", actualFrequency );
+          LOG_PRO( LOG_ERROR, " RECEIVED CALLBACK WITH UNEXPECTED FREQUENCY : %ld Hz ", long(actualFrequency) );
           mHasDifferentLOFrequency = false;
         }
         else
-          LOG_PRO( LOG_DEBUG, " RECEIVED CALLBACK WITH EXPECTED FREQUENCY : %d Hz ", actualFrequency );
+          LOG_PRO( LOG_DEBUG, " RECEIVED CALLBACK WITH EXPECTED FREQUENCY : %ld Hz ", long(actualFrequency) );
       }
       else
-        LOG_PRO( LOG_DEBUG, " RECEIVED CALLBACK WITH ERRONEOUS RETURN OF FREQUENCY : %d Hz --> ERROR !", actualFrequency );
+        LOG_PRO( LOG_DEBUG, " RECEIVED CALLBACK WITH ERRONEOUS RETURN OF FREQUENCY : %ld Hz --> ERROR !", long(actualFrequency) );
 
 
       pbOk = false;
@@ -608,8 +617,6 @@ bool RFspaceNetReceiver::startHW(int64_t LOfreq)
 
   mSampleBufferLenInFrames = 0;
 
-  mChangeBitRangeSmpRateIdx = getMaxSmpRateIdx(mpoSettings->iBitDepthThresSamplerate);
-
   rcv.setRcvFreq(LOfreq);
   mpoSettings->iFrequency = LOfreq;
 
@@ -640,7 +647,7 @@ void RFspaceNetReceiver::setHWLO( int64_t LOFreq )
   }
   else
   {
-    LOG_PRO( LOG_DEBUG, "RFspaceNetReceiver::setHWLO() : RECEIVED LOFreq : %d Hz", LOFreq);
+    LOG_PRO( LOG_DEBUG, "RFspaceNetReceiver::setHWLO() : RECEIVED LOFreq : %ld Hz", long(LOFreq));
 
     int64_t actualSetLOFreq = LOFreq;
 
@@ -649,10 +656,10 @@ void RFspaceNetReceiver::setHWLO( int64_t LOFreq )
     {
       actualSetLOFreq =  PROCLIP( LOFreq, mpoSettings->iBand_minFreq, mpoSettings->iBand_maxFreq);
       mHasDifferentLOFrequency = true;
-      LOG_PRO( LOG_ERROR, "RFspaceNetReceiver::setHWLO(%d) : OUT OF AVAILABLE FREQUENCY RANGE! SETTING mpoSettings->iFrequency = %d Hz", LOFreq, actualSetLOFreq);
+      LOG_PRO( LOG_ERROR, "RFspaceNetReceiver::setHWLO(%ld) : OUT OF AVAILABLE FREQUENCY RANGE! SETTING mpoSettings->iFrequency = %ld Hz", long(LOFreq), long(actualSetLOFreq));
     }
     else
-      LOG_PRO( LOG_DEBUG, "RFspaceNetReceiver::setHWLO(%d) : SETTING mpoSettings->iFrequency = %d Hz", LOFreq, actualSetLOFreq);
+      LOG_PRO( LOG_DEBUG, "RFspaceNetReceiver::setHWLO(%ld) : SETTING mpoSettings->iFrequency = %ld Hz", long(LOFreq), long(actualSetLOFreq));
 
 
     if(mpoSettings->iFrequency != actualSetLOFreq)
@@ -771,7 +778,7 @@ void RFspaceNetReceiver::setSamplerate( int idx )
 
   if (bIsStreaming && bOk)
   {
-    LOG_PRO( LOG_DEBUG, "************************************** RFspaceNetReceiver::setSamplerate(): send ChangedSamplerate-Callback *********************************");
+    LOG_PRO( LOG_ERROR, "************************************** RFspaceNetReceiver::setSamplerate(): send ChangedSamplerate-Callback while running! *********************************");
     EXTIO_STATUS_CHANGE(mExtIOCallbackPtr , extHw_Changed_SampleRate );
     mpoSettings->uiLastReportedSamplerate = mpoSettings->uiSamplerate;
     return;
@@ -781,13 +788,24 @@ void RFspaceNetReceiver::setSamplerate( int idx )
   LOG_PRO(LOG_DEBUG, "************************************** RFspaceNetReceiver::setSamplerate(%u): set Samplerate ************************", mpoSettings->uiSamplerate);
   rcv.setIQOutSmpRate(RFspaceNetSDRControl::IQOutSmpRate(mpoSettings->uiSamplerate));
 
-  if (0)    // next startHW() should do
   {
-    //restart udp data (24bit/16bit) after "mStartUDPTimer" ms in "TimerProc" --> NetSDR sometimes streams wrong bitrate (although claiming it would stream the right bitrate).
-    //--> give samplerate change (and sometimes therefore bitdepth change) more time.
-    mStartUDPTimer = 100; //in ms
-    mStartData = true;
+    int changeBitRangeSmpRateIdx = getMaxSmpRateIdx(mpoSettings->iBitDepthThresSamplerate);
+    mNetSdrBitDepth = (mpoSettings->iSampleRateIdx <= changeBitRangeSmpRateIdx) ? 24 : 16;
+#if NORMALIZE_DATA
+    mExtHwSampleFormat = extHw_SampleFormat_FLT32;
+    mExtHwBitDepth = 32;
+#else
+    mExtHwSampleFormat = (mNetSdrBitDepth == 24) ? extHw_SampleFormat_PCM24 : extHw_SampleFormat_PCM16;
+    mExtHwBitDepth = (mNetSdrBitDepth == 24) ? 24 : 16;
+#endif
+    if (mLastReportedSampleFormat != mExtHwSampleFormat)
+    {
+      LOG_PRO(LOG_PROTOCOL, "SEND STATUS CHANGE TO SDR: NEW BIT DEPTH %d Bit.", mExtHwBitDepth);
+      EXTIO_STATUS_CHANGE(mExtIOCallbackPtr, mExtHwSampleFormat);
+      mLastReportedSampleFormat = mExtHwSampleFormat;
+    }
   }
+
 }
 
 int64_t RFspaceNetReceiver::getHWLO( void )
@@ -801,7 +819,7 @@ int RFspaceNetReceiver::getAttIdx()
   for(int idx = 0; idx <= miNumAttenuations-1; ++idx)
   {
     if( ( mafAttenuationATTs[idx] == mRFGaindB) && ( fabsf(mafAttenuationADGains[idx] - mADGain) < 0.1 ) )
-      LOG_PRO( LOG_DEBUG, "******** RFspaceNetReceiver::getAttIdx() : ADGain: %.1f, RFGain: %d --> idx: %d", mafAttenuationATTs[idx], mafAttenuationADGains[idx] , idx);
+      LOG_PRO( LOG_DEBUG, "******** RFspaceNetReceiver::getAttIdx() : ADGain: %.1f, RFGain: %.1f --> idx: %d", mafAttenuationATTs[idx], mafAttenuationADGains[idx] , idx);
     ret = idx;
     break;
   }
@@ -874,15 +892,16 @@ void RFspaceNetReceiver::TimerProc(uint16_t waitMs)
     {
       mStartData = false;
       setGain(mpoSettings->iControlValue);
-      if( mpoSettings->iSampleRateIdx <= mChangeBitRangeSmpRateIdx )
+
+      if (mNetSdrBitDepth==24)
       {
+        LOG_PRO(LOG_DEBUG, "**************** RFspaceNetReceiver::setSamplerate(): START 24 BIT DATA STREAM *********************************");
         rcv.start24BitDataStream();
-        LOG_PRO( LOG_DEBUG, "****************RFspaceNetReceiver::setSamplerate( ):  START 24 BIT DATA STREAM *********************************");
       }
-      else if ( mpoSettings->iSampleRateIdx > mChangeBitRangeSmpRateIdx )
+      else if (mNetSdrBitDepth==16)
       {
+        LOG_PRO(LOG_DEBUG, "**************** RFspaceNetReceiver::setSamplerate(): START 16 BIT DATA STREAM *********************************");
         rcv.start16BitDataStream();
-        LOG_PRO( LOG_DEBUG, "****************RFspaceNetReceiver::setSamplerate( ):  START 16 BIT DATA STREAM *********************************");
       }
     }
   }

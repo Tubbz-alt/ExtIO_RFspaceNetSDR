@@ -166,6 +166,14 @@ RFspaceNetSDRControl::RFspaceNetSDRControl(RFspaceNetSDRControl::CallbackIfc * p
   mSocket.Initialize();
 }
 
+RFspaceNetSDRControl::RFspaceNetSDRControl(CSimpleSocket * pSocket, RFspaceNetSDRControl::CallbackIfc * pCB)
+  : mpSocket( pSocket )
+  , mSocket( *mpSocket )
+  , mpCallBack( pCB )
+{
+    resetReceiverData();
+}
+
 
 RFspaceNetSDRControl::~RFspaceNetSDRControl()
 {
@@ -288,7 +296,6 @@ bool RFspaceNetSDRControl::connect(const char * ip, unsigned portNo, int nConnec
 
   return bConnected;
 }
-
 
 bool RFspaceNetSDRControl::close()
 {
@@ -994,17 +1001,9 @@ bool RFspaceNetSDRControl::poll(  )
   {
     const int32_t maxReadLen = mRxMsgLen - mRxLen;
 
-    int32_t peekRx = mSocket.GetNumReceivableBytes();
-    int32_t rx = 0;
-    if(peekRx)
-    {
-
-      rx = mSocket.Receive( maxReadLen, &mRxBuffer[mRxLen] );
-    }
-
+    int32_t rx = mSocket.Receive( maxReadLen, &mRxBuffer[mRxLen] );
     if ( rx > 0 )
     {
-
       mRxLen += rx;
       if ( mRxLen == mRxMsgLen )
       {
@@ -1030,7 +1029,6 @@ bool RFspaceNetSDRControl::poll(  )
         }
         else
         {
-
           processReceivedControlMessage(true);
           mRxLen = 0;
           mRxMsgLen = 2;
@@ -1039,6 +1037,11 @@ bool RFspaceNetSDRControl::poll(  )
         }
       }
       continue;
+    }
+    else if ( !rx )
+    {
+        LOG_PRO( LOG_ERROR, "PEER closed tcp/control socket.");
+        return false;
     }
     else if ( mSocket.IsSocketInvalid() )
     {
@@ -1158,9 +1161,10 @@ bool RFspaceNetSDRControl::processReceivedControlMessage(bool isValidMessage)
     case 0x0018:  // 4.2.1 Receiver State --> Main "Start/Stop" command to start or stop data capture by the NetSDR
     {
       mHasRcvState = true;
-      parseRcvStateBytes( );
-      bool bOk = false;
-      printBitDepthText(this->getStreamBitDepth(&bOk));
+      parseRcvStateBytes();
+      //bool bOk = false;
+      //int r = getStreamBitDepth(&bOk)
+      //printBitDepthText(r);
       mpCallBack->receiveRFspaceNetSDRControlInfo(CallbackIfc::Info::RCV_STATE);
       break;
     }
@@ -1212,7 +1216,7 @@ bool RFspaceNetSDRControl::processReceivedControlMessage(bool isValidMessage)
         default:
           LOG_PRO( LOG_DEBUG , "ERROR ! --> in  4.2.6 RF Gain");
       }
-      printText(mRFGains.eChn1RFGain);
+      //printText(mRFGains.eChn1RFGain);
 
       if(mpCallBack)
         mpCallBack->receiveRFspaceNetSDRControlInfo(CallbackIfc::Info::RF_GAIN);
@@ -1260,8 +1264,8 @@ bool RFspaceNetSDRControl::processReceivedControlMessage(bool isValidMessage)
     {
       mHasADModes = true;
       parseADModes();
-      bool bOk = false;
-      printText(getADGain(&bOk));
+      //bool bOk = false;
+      //printText(getADGain(&bOk));
       if(mpCallBack)
         mpCallBack->receiveRFspaceNetSDRControlInfo(CallbackIfc::Info::ADC_MODE);
       break;
@@ -1270,7 +1274,7 @@ bool RFspaceNetSDRControl::processReceivedControlMessage(bool isValidMessage)
       mHasIQOutSmpRate = true;
       wp = &mRxBuffer[5];
       mIQOutSmpRate = IQOutSmpRate(READ_LITTLE_INT32( wp ));
-      printText(mIQOutSmpRate);
+      //printText(mIQOutSmpRate);
       if(mpCallBack)
         mpCallBack->receiveRFspaceNetSDRControlInfo(CallbackIfc::Info::IQ_OUT_SAMPLERATE);
       break;
@@ -1836,5 +1840,25 @@ const char * getText( uint8_t e )
 
     default:  return "ERROR !";
   }
+}
+
+
+const char * getText( RFspaceNetSDRControl::CallbackIfc::Info e)
+{
+    switch (e) {
+    case RFspaceNetSDRControl::CallbackIfc::Info::FREQUENCY        : return "FREQUENCY";
+    case RFspaceNetSDRControl::CallbackIfc::Info::ADC_SCALE        : return "ADC_SCALE";
+    case RFspaceNetSDRControl::CallbackIfc::Info::RF_GAIN          : return "RF_GAIN";
+    case RFspaceNetSDRControl::CallbackIfc::Info::VUHF_INFO        : return "VUHF_INFO";
+    case RFspaceNetSDRControl::CallbackIfc::Info::RF_FILTER        : return "RF_FILTER";
+    case RFspaceNetSDRControl::CallbackIfc::Info::ADC_MODE         : return "ADC_MODE";
+    case RFspaceNetSDRControl::CallbackIfc::Info::IQ_OUT_SAMPLERATE: return "IQ_OUT_SAMPLERATE";
+    case RFspaceNetSDRControl::CallbackIfc::Info::UDP_PACKET_SIZE  : return "UDP_PACKET_SIZE";
+    case RFspaceNetSDRControl::CallbackIfc::Info::UDP_INTERFACE    : return "UDP_INTERFACE";
+    case RFspaceNetSDRControl::CallbackIfc::Info::RCV_STATE        : return "RCV_STATE";
+    case RFspaceNetSDRControl::CallbackIfc::Info::OPTIONS          : return "OPTIONS";
+    case RFspaceNetSDRControl::CallbackIfc::Info::NAK              : return "NAK";
+    default:    return "ERROR !";
+    }
 }
 

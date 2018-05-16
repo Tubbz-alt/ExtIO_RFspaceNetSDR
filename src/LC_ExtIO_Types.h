@@ -72,6 +72,11 @@
  *
  */
 
+#ifndef WIN32
+#define __cdecl
+#define __stdcall
+#endif
+
 // function implemented by Winrad / HDSDR; see enum extHWstatusT below
 // IQoffs is no longer used (HDSDR >= 2.75), if ever used by any ExtIO!
 // DC offset correction can be done inside HDSDR

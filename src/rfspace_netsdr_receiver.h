@@ -144,6 +144,9 @@ public:
   int getMaxSmpRateIdx(uint32_t);
   const int64_t * getFrequencyRanges( int idx );
 
+  int getExtHwSampleFormat() const  { return mExtHwSampleFormat;  }
+  int getExtHwBitDepth() const      { return mExtHwBitDepth;      }
+
   void TimerProc(uint16_t waitMs);
 
   RFspaceNetSDRControl rcv;
@@ -195,7 +198,7 @@ private:
   bool mHasVUHFFreqRange;
   bool mHasOptions;
 
-  int mLastReportedBitDepth;
+  int mLastReportedSampleFormat;
   unsigned mLastReportedFmt;
 
   volatile int mStartUDPTimer;
@@ -203,10 +206,11 @@ private:
 
   RFspaceNetSDRControl::Options mReceiverOptions;
 
-  uint8_t mChangeBitRangeSmpRateIdx;
-
   ReceiverMode mReceiverMode;
   GainControlMode mGainControlMode;
 
+  int mNetSdrBitDepth;
+  int mExtHwSampleFormat; // HDSDR enum != bit depth
+  int mExtHwBitDepth;
 };
 

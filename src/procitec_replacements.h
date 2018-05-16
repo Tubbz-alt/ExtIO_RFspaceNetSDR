@@ -20,7 +20,7 @@
 #define STRINGIZEL(s) #s
 
 #define EXTIO_IFC_VER 2018
-#define EXTIO_VER_REV 2
+#define EXTIO_VER_REV 3
 #define SCM_TAGNAME ""
 #define SCM_DATE    ""
 
