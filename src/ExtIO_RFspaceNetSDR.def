@@ -1,6 +1,4 @@
 
-LIBRARY      "ExtIO_RFspaceNetSDR"
-
 ; Explicit exports
 EXPORTS
 

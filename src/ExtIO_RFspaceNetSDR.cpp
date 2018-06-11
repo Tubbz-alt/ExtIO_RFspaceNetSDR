@@ -1,7 +1,12 @@
 
+#define SETTINGS_IDENTIFIER "RFspace-0.7"
+
 #define HWNAME "RFspace"
-#define HWMODEL "RFspace NetSDR"
-#define SETTINGS_IDENTIFIER "RFspace NetSDR-0.5"
+#if 0
+#define HWMODEL "NetSDR"
+#else
+#define HWMODEL "CloudIQ"
+#endif
 
 #include "ExtIO_RFspaceNetSDR.h"
 #include "rfspace_netsdr_receiver.h"
@@ -92,10 +97,11 @@ static void ReceiverThreadProc( void* lpParameter )
   // @todo: move everything to gpoReceiver->ThreadProc() - including gbExitControlThread ...
 
   const uint16_t uiWaitMs = 5;
+  const int iWaitMs = uiWaitMs;
   while ( !gbExitControlThread )
   {
-    tthread::this_thread::sleep_for( tthread::chrono::milliseconds( uiWaitMs ) );
-    gpoReceiver->TimerProc(uiWaitMs);
+    gpoReceiver->TimerProc(iWaitMs);
+    tthread::this_thread::sleep_for(tthread::chrono::milliseconds(uiWaitMs));
   }
   gbExitControlThread    = false;
   gbControlThreadRunning = false;
@@ -166,17 +172,20 @@ bool EXTIO_CALL InitHW( char* name, char* model, int& type )
 {
   type = RFspaceNetReceiver::getDefaultHWType();
   strcpy( name, HWNAME );
-  strcpy( model, HWMODEL );
+  strcpy( model, "" );
 
   if ( !gbInitHW )
   {
     // read default values from Settings: giRcvFreq, giAgcIdx, ..
     // do not overwrite them
     if (!gpoSettings)
-      gpoSettings = new RFspaceNetReceiver::Settings();
+      gpoSettings = new RFspaceNetReceiver::Settings(HWMODEL);
 
     if ( gpoSettings->iAttenuationIdx < 0 || gpoSettings->iAttenuationIdx >= RFspaceNetReceiver::miNumAttenuations  )
       gpoSettings->iAttenuationIdx = 0;
+
+    RFspaceNetReceiver::applyHwModel(*gpoSettings);
+    strcpy(model, gpoSettings->acModel );
 
     gbInitHW = true;
   }
@@ -187,7 +196,7 @@ bool EXTIO_CALL InitHW( char* name, char* model, int& type )
 //---------------------------------------------------------------------------
 bool EXTIO_CALL OpenHW(void)
 {
-  LOG_PRO(LOG_DEBUG, "OpenHW() called .. returning gbInitHw = %s", (gbInitHW ? "true" : "false"));
+  LOG_PRO(LOG_DEBUG, "*** OpenHW() called .. returning gbInitHw = %s", (gbInitHW ? "true" : "false"));
   return gbInitHW;  // open on demand!
 }
 
@@ -200,7 +209,7 @@ static bool InternalOpenHW(void)
     if ( !gpoReceiver )
     {
       if (!gpoSettings)
-        gpoSettings = new RFspaceNetReceiver::Settings();
+        gpoSettings = new RFspaceNetReceiver::Settings(HWMODEL);
 
       gpoReceiver = new RFspaceNetReceiver();
       bOpenOK = false;
@@ -208,10 +217,14 @@ static bool InternalOpenHW(void)
       {
         gpoReceiver->setExtIoCallback(gpfnExtIOCallbackPtr);
         stopThread();
-        LOG_PRO(LOG_DEBUG, "InternalOpenHW(): trying to open/connect device ..");
+        LOG_PRO(LOG_DEBUG, "*** InternalOpenHW(): trying to open/connect device ..");
         bOpenOK = gpoReceiver->openHW(gpoSettings);
         if (bOpenOK)
+        {
           startThread();
+          tthread::this_thread::sleep_for(tthread::chrono::milliseconds(300));
+          LOG_PRO(LOG_DEBUG, "*** InternalOpenHW(): continue after sleep of 300 ms");
+        }
         else
         {
           delete gpoReceiver;
@@ -223,7 +236,7 @@ static bool InternalOpenHW(void)
           ::MessageBoxA(0, acMsg, "Error", MB_OK);
 #endif
         }
-        LOG_PRO(LOG_DEBUG, "InternalOpenHW() returns gbInitHW && bOpenOK = %s && %s", (gbInitHW ? "true" : "false"), (bOpenOK ? "true" : "false"));
+        LOG_PRO(LOG_DEBUG, "*** InternalOpenHW() returns gbInitHW && bOpenOK = %s && %s", (gbInitHW ? "true" : "false"), (bOpenOK ? "true" : "false"));
       }
     }
   }
@@ -241,7 +254,7 @@ int EXTIO_CALL StartHW( long LOfreq )
 //---------------------------------------------------------------------------
 int64_t EXTIO_CALL StartHW64( int64_t LOfreq )
 {
-  LOG_PRO( LOG_DEBUG, "StartHW64() called" );
+  LOG_PRO( LOG_DEBUG, "*** StartHW64() called" );
 
   const bool bConnected = InternalOpenHW();
   if (!bConnected && gpfnExtIOCallbackPtr)
@@ -252,15 +265,7 @@ int64_t EXTIO_CALL StartHW64( int64_t LOfreq )
 
   bool bStartOK = gpoReceiver->startHW(LOfreq);
 
-  LOG_PRO( LOG_DEBUG, "StartHW64(): %s", (bStartOK ? "successful":"failed") );
-
-  if (0)
-  {
-    int sampleFmt = gpoReceiver->getExtHwSampleFormat();
-    int bitDepth = gpoReceiver->getExtHwBitDepth();
-    LOG_PRO(LOG_PROTOCOL, "SEND STATUS CHANGE AT START TO SDR: NEW BIT DEPTH %d Bit.", bitDepth);
-    EXTIO_STATUS_CHANGE(gpfnExtIOCallbackPtr, sampleFmt);
-  }
+  LOG_PRO( LOG_DEBUG, "*** StartHW64(): %s", (bStartOK ? "successful":"failed") );
 
   // number of complex elements returned each
   // invocation of the callback routine
@@ -270,16 +275,25 @@ int64_t EXTIO_CALL StartHW64( int64_t LOfreq )
 //---------------------------------------------------------------------------
 void EXTIO_CALL StopHW( void )
 {
-  LOG_PRO( LOG_DEBUG, "StopHW() called" );
+  LOG_PRO( LOG_DEBUG, "*** StopHW() called" );
   if ( !gbInitHW || !gpoReceiver )
     return;
 
+  LOG_PRO(LOG_DEBUG, "*** * StopHW() -> calling stopDataStream()");
+  bool bOk = false;
+  const bool bWasRunning = gpoReceiver->rcv.isUDPDataStreamRunning(&bOk) && bOk;
   gpoReceiver->rcv.stopDataStream();
+  if (bWasRunning)
+    tthread::this_thread::sleep_for(tthread::chrono::milliseconds(300));
+  const bool bIsRunning = gpoReceiver->rcv.isUDPDataStreamRunning(&bOk) && bOk;
+  LOG_PRO(LOG_DEBUG, "*** * StopHW() -> DataStream is %s%s"
+    , (bIsRunning ? "still running" : "stopped now")
+    , (bWasRunning ? ", after sleep of 300 ms" : ""));
 }
 
 void EXTIO_CALL CloseHW( void )
 {
-  LOG_PRO( LOG_DEBUG, "CloseHW() called" );
+  LOG_PRO( LOG_DEBUG, "*** CloseHW() called" );
   // ..... here you can shutdown your graphical interface, if any............
   if ( gbInitHW )
   {
@@ -300,11 +314,10 @@ int EXTIO_CALL SetHWLO( long LOfreq )
 
 int64_t EXTIO_CALL SetHWLO64( int64_t LOfreq )
 {
-  LOG_PRO( LOG_DEBUG, "************************************** SetHWLO(%ld) *********************************", long(LOfreq));
-  LOG_PRO( LOG_DEBUG, "SetHWLO64(%ld Hz) called", long(LOfreq) );
+  LOG_PRO( LOG_DEBUG, "*** SetHWLO64(%ld) called", long(LOfreq));
   if ( !gpoReceiver )
   {
-    LOG_PRO( LOG_DEBUG, "SetHWLO64(): ERROR: No Receiver");
+    LOG_PRO( LOG_DEBUG, "***  * SetHWLO64(): ERROR: No Receiver");
     return 1; // Error
   }
   gpoReceiver->setHWLO(LOfreq);
@@ -321,10 +334,10 @@ int EXTIO_CALL GetStatus( void )
 void EXTIO_CALL SetCallback( pfnExtIOCallback funcptr )
 {
   gpfnExtIOCallbackPtr = funcptr;
-  if ( !gpoReceiver )
+  LOG_PRO(LOG_DEBUG, "*** SetCallback(%p) called", funcptr);
+  if (!gpoReceiver)
     return;
   gpoReceiver->setExtIoCallback(funcptr);
-  LOG_PRO( LOG_DEBUG, "SetCallback(%p) called .. after having set callback function", funcptr);
 }
 
 //---------------------------------------------------------------------------
@@ -334,9 +347,7 @@ int64_t EXTIO_CALL GetHWLO64( void )
     return 0;
 
   uint64_t f = gpoReceiver->getHWLO();
-
   return f;
-
 }
 
 long EXTIO_CALL GetHWLO( void )
@@ -348,19 +359,19 @@ long EXTIO_CALL GetHWLO( void )
 }
 //---------------------------------------------------------------------------
 
-long EXTIO_CALL GetHWSR( void )
+long EXTIO_CALL GetHWSR(void)
 {
-  LOG_PRO( LOG_DEBUG, "GetHWSR() called");
+  LOG_PRO( LOG_DEBUG, "*** GetHWSR() called");
   if (!gpoSettings)
-    gpoSettings = new RFspaceNetReceiver::Settings();
+    gpoSettings = new RFspaceNetReceiver::Settings(HWMODEL);
   long srate = long(gpoSettings->uiSamplerate);
-  LOG_PRO(LOG_DEBUG, "GetHWSR(): %ld Hz", srate);
+  LOG_PRO(LOG_DEBUG, "*** * GetHWSR() --> %ld Hz", srate);
   return long(srate);
 }
 
 int EXTIO_CALL ExtIoGetFreqRanges(int idx, int64_t * freq_low, int64_t * freq_high )
 {
-  LOG_PRO( LOG_DEBUG, "************************************** GET FREQRANGES( )*********************************");
+  LOG_PRO(LOG_DEBUG, "*** ExtIoGetFreqRanges(%d) called", idx);
   if ( !gpoReceiver )
     return 0;
 
@@ -368,8 +379,9 @@ int EXTIO_CALL ExtIoGetFreqRanges(int idx, int64_t * freq_low, int64_t * freq_hi
 
     if(range)
     {
-      * freq_low = range[0];
-      * freq_high = range[1];
+      *freq_low = range[0];
+      *freq_high = range[1];
+      LOG_PRO(LOG_DEBUG, "*** ExtIoGetFreqRanges(%d) --> %ld - %ld Hz", idx, long(*freq_low), long(*freq_high));
       return 0;
     }
     else
@@ -386,7 +398,7 @@ int EXTIO_CALL ExtIoGetFreqRanges(int idx, int64_t * freq_low, int64_t * freq_hi
 int EXTIO_CALL GetAttenuators( int atten_idx, float* gain )
 {
   if (!gpoSettings)
-    gpoSettings = new RFspaceNetReceiver::Settings();
+    gpoSettings = new RFspaceNetReceiver::Settings(HWMODEL);
 
   // fill in attenuation (gain)
   // use positive attenuation levels if signal is amplified (LNA)
@@ -399,10 +411,10 @@ int EXTIO_CALL GetAttenuators( int atten_idx, float* gain )
     if ( atten_idx >= 0 && atten_idx < RFspaceNetReceiver::miNumAttenuations )
     {
       *gain = (RFspaceNetReceiver::mafAttenuationATTs[atten_idx] + RFspaceNetReceiver::mafAttenuationADGainsdB[atten_idx]) ;
-      LOG_PRO( LOG_DEBUG, "************************************** GetAttenuators(%d) --> %.2f *********************************", atten_idx, *gain );
+      LOG_PRO(LOG_DEBUG, "*** GetAttenuators(idx %d) called --> %.2f dB", atten_idx, *gain );
       return 0;
     }
-    LOG_PRO( LOG_DEBUG, "************************************** GetAttenuators(%d) --> ERR *********************************", atten_idx );
+    LOG_PRO(LOG_DEBUG, "*** GetAttenuators(idx %d) called --> ERR", atten_idx );
   }
   else
   {
@@ -411,20 +423,20 @@ int EXTIO_CALL GetAttenuators( int atten_idx, float* gain )
       if ( atten_idx >= 0 && atten_idx < RFspaceNetReceiver::miNumCompatibilityGains )
           {
             *gain = (RFspaceNetReceiver::mafVUHFCompatibilityGainValues[atten_idx] ) ;
-            LOG_PRO( LOG_DEBUG, "************************************** GetAttenuators(%d) --> %.2f *********************************", atten_idx, *gain );
+            LOG_PRO(LOG_DEBUG, "*** GetAttenuators(idx %d) called --> %.2f dB", atten_idx, *gain );
             return 0;
           }
-          LOG_PRO( LOG_DEBUG, "************************************** GetAttenuators(%d) --> ERR *********************************", atten_idx );
+          LOG_PRO(LOG_DEBUG, "*** GetAttenuators(idx %d) called --> ERR", atten_idx );
     }
     else
     {
       if ( atten_idx >= 0 && atten_idx < RFspaceNetReceiver::miNumMultiGains )
       {
         *gain = (RFspaceNetReceiver::mafVUHFMultiGainValues[atten_idx] ) ;
-        LOG_PRO( LOG_DEBUG, "************************************** GetAttenuators(%d) --> %.2f *********************************", atten_idx, *gain );
+        LOG_PRO(LOG_DEBUG, "*** GetAttenuators(idx %d) called --> %.2f dB", atten_idx, *gain );
         return 0;
       }
-      LOG_PRO( LOG_DEBUG, "************************************** GetAttenuators(%d) --> ERR *********************************", atten_idx );
+      LOG_PRO(LOG_DEBUG, "*** GetAttenuators(idx %d) called --> ERR", atten_idx );
     }
   }
   return 1;
@@ -432,18 +444,17 @@ int EXTIO_CALL GetAttenuators( int atten_idx, float* gain )
 
 int EXTIO_CALL GetActualAttIdx( void )
 {
-
   if (!gpoSettings)
-    gpoSettings = new RFspaceNetReceiver::Settings();
+    gpoSettings = new RFspaceNetReceiver::Settings(HWMODEL);
 
   int ret = RFspaceNetReceiver::getActualAttIdx(gpoSettings);
-  LOG_PRO( LOG_DEBUG, "************************************** GetActualAttIdx() --> %d *********************************", ret );
+  LOG_PRO(LOG_DEBUG, "*** GetActualAttIdx() called --> %d", ret );
   return ret;
 }
 
 int EXTIO_CALL SetAttenuator( int atten_idx )
 {
-  LOG_PRO( LOG_DEBUG, "************************************** SetAttenuator(%d)*********************************", atten_idx);
+  LOG_PRO(LOG_DEBUG, "*** SetAttenuator(idx %d) called", atten_idx);
   if(!gpoSettings->bIsVUHFRange)
   {
     if ( atten_idx < 0 || atten_idx >= RFspaceNetReceiver::miNumAttenuations )
@@ -472,8 +483,8 @@ int EXTIO_CALL SetAttenuator( int atten_idx )
   else
   {
     if (!gpoSettings)
-      gpoSettings = new RFspaceNetReceiver::Settings();
-    LOG_PRO( LOG_DEBUG, "SetAttenuator (%d) : Fallback ", atten_idx);
+      gpoSettings = new RFspaceNetReceiver::Settings(HWMODEL);
+    LOG_PRO(LOG_DEBUG, "*** * SetAttenuator(idx %d) : Fallback without receiver", atten_idx);
     if(!gpoSettings->bIsVUHFRange)
       gpoSettings->iAttenuationIdx = atten_idx;
     else
@@ -493,12 +504,12 @@ int EXTIO_CALL SetAttenuator( int atten_idx )
 
 int EXTIO_CALL ExtIoGetSrates( int srate_idx, double* samplerate )
 {
-
-if( srate_idx >= 0 && srate_idx < RFspaceNetReceiver::miNumSamplerates)
-    {
-      *samplerate = RFspaceNetReceiver::srate_bws[srate_idx].srate;
-      return 0;
-    }
+  if( srate_idx >= 0 && srate_idx < RFspaceNetReceiver::miNumSamplerates)
+  {
+    *samplerate = RFspaceNetReceiver::srate_bws[srate_idx].srate;
+    LOG_PRO(LOG_DEBUG, "*** ExtIoGetSrates(%d) called --> %.1f kHz", srate_idx, *samplerate);
+    return 0;
+  }
   else
   {
     return 1; // ERROR
@@ -508,7 +519,7 @@ if( srate_idx >= 0 && srate_idx < RFspaceNetReceiver::miNumSamplerates)
 int EXTIO_CALL ExtIoGetActualSrateIdx( void )
 {
   if (!gpoSettings)
-    gpoSettings = new RFspaceNetReceiver::Settings();
+    gpoSettings = new RFspaceNetReceiver::Settings(HWMODEL);
 
   int ret = gpoSettings->iSampleRateIdx;
   return ret;
@@ -516,21 +527,24 @@ int EXTIO_CALL ExtIoGetActualSrateIdx( void )
 
 int EXTIO_CALL ExtIoSetSrate( int srate_idx )
 {
-  LOG_PRO( LOG_DEBUG, "************************************** ExtIoSetSrate(%d)*********************************", srate_idx);
   int clippedIdx = PROCLIP(srate_idx, 0, RFspaceNetReceiver::miNumSamplerates - 1);
   if ( gpoReceiver )
   {
+    LOG_PRO(LOG_DEBUG, "*** ExtIoSetSrate(idx %d) called. setting for idx %d, %u Hz", srate_idx, clippedIdx, RFspaceNetReceiver::srate_bws[clippedIdx].srate);
     gpoReceiver->setSamplerate(clippedIdx);
     return (srate_idx == clippedIdx ? 0 : 1);
   }
   else
   {
-    if (!gpoSettings)
-      gpoSettings = new RFspaceNetReceiver::Settings();
-    LOG_PRO( LOG_DEBUG, "************************************** ExtIoSetSrate(): receiver does not exist. set settings *********************************");
-
-    gpoSettings->iSampleRateIdx = clippedIdx;
-    return (srate_idx == clippedIdx ? 0 : 1);
+    LOG_PRO(LOG_DEBUG, "*** ExtIoSetSrate(idx %d) called --> receiver does not exist. Ignoring call.", srate_idx);
+    return 0;
+    //if (!gpoSettings)
+    //  gpoSettings = new RFspaceNetReceiver::Settings(HWMODEL);
+    //gpoSettings->iSampleRateIdx = clippedIdx;
+    //gpoSettings->uiSamplerate = RFspaceNetReceiver::srate_bws[clippedIdx].srate;
+    //gpoSettings->uiBandwidth = RFspaceNetReceiver::srate_bws[clippedIdx].bw;
+    //LOG_PRO(LOG_DEBUG, "*** ExtIoSetSrate(idx %d) called --> receiver does not exist. set idx %d for %u Hz in settings", srate_idx, clippedIdx, gpoSettings->uiSamplerate);
+    //return (srate_idx == clippedIdx ? 0 : 1);
   }
 }
 
@@ -551,16 +565,17 @@ long EXTIO_CALL ExtIoGetBandwidth( int srate_idx )
 
 enum class Setting {
       ID = 0      // enum values MUST be incremental without gaps!
+    , MODEL
     , CTRL_IP, CTRL_PORT    // NetSDR IP/Port
     , DATA_IP, DATA_PORT    // myPC Data IP/Port
     , CONNECT_TIMEOUT_MILLIS
     , AVAIL_SRATES
     , AVAIL_BWS
     , SAMPLERATE_IDX
+    , USE_16BIT_FOR_ALL
     , RCV_FRQ
     , RCV_BW
     , RCV_ATTEN_IDX
-    , BITDEPTH_CHANGE_SMPRATE
     , BAND1_RANGE_MINFREQ
     , BAND1_RANGE_MAXFREQ
     , IS_VUHF_RANGE
@@ -580,13 +595,18 @@ int EXTIO_CALL ExtIoGetSetting( int idx, char* description, char* value )
   int k;
   size_t off;
   if (!gpoSettings)
-    gpoSettings = new RFspaceNetReceiver::Settings();
+    gpoSettings = new RFspaceNetReceiver::Settings(HWMODEL);
 
   switch( Setting(idx) )
   {
     case Setting::ID:
       snprintf( description, 1024, "%s", "Identifier" );
       snprintf( value, 1024, "%s", SETTINGS_IDENTIFIER );
+      return 0;
+
+    case Setting::MODEL:
+      snprintf(description, 1024, "%s", "Model: 'NetSDR' / 'CloudIQ'");
+      snprintf(value, 1024, "%s", gpoSettings->acModel);
       return 0;
 
     case Setting::CTRL_IP:
@@ -603,7 +623,7 @@ int EXTIO_CALL ExtIoGetSetting( int idx, char* description, char* value )
       snprintf( value, 1024, "%s", gpoSettings->acDataIP );
       return 0;
     case Setting::DATA_PORT:
-      snprintf( description, 1024, "%s", "DATA PortNo: port number of Client PC to receive streaming data (default: as CONTROL PortNo)" );
+      snprintf( description, 1024, "%s", "DATA PortNo: port number of Client PC to receive streaming data (default: as CONTROL PortNo). Entry ignored when DATA_IP empty" );
       snprintf( value, 1024, "%d", gpoSettings->uDataPortNo );
       return 0;
 
@@ -643,6 +663,11 @@ int EXTIO_CALL ExtIoGetSetting( int idx, char* description, char* value )
       snprintf( value, 1024, "%d", gpoSettings->iSampleRateIdx );
       return 0;
 
+    case Setting::USE_16BIT_FOR_ALL:
+      snprintf(description, 1024, "%s", "Use 16 Bit for All Samplerates?");
+      snprintf(value, 1024, "%d", (gpoSettings->bUse16BitForAll ? 1 : 0) );
+      return 0;
+
     case Setting::RCV_FRQ:
       snprintf( description, 1024, "%s", "frequency for Receiver" );
       snprintf( value, 1024, "%ld", gpoSettings->iFrequency );
@@ -656,11 +681,6 @@ int EXTIO_CALL ExtIoGetSetting( int idx, char* description, char* value )
     case Setting::RCV_ATTEN_IDX:
       snprintf( description, 1024, "%s", "MGC AttenuationIdx (0..N) for Receiver" );
       snprintf( value, 1024, "%u", gpoSettings->iAttenuationIdx);
-      return 0;
-
-    case Setting::BITDEPTH_CHANGE_SMPRATE:
-      snprintf( description, 1024, "%s", "Samplerate at which bitdepth is reduced from 24 to 16 bit. For samplerates <= value, you get 24 Bit, else 16 bit. From Specification: 1 333 333 Hz." );
-      snprintf( value, 1024, "%u", gpoSettings->iBitDepthThresSamplerate);
       return 0;
 
     case Setting::BAND1_RANGE_MINFREQ:
@@ -762,7 +782,7 @@ static const char * trimmedIP(const char * value, const char * logText)
 void EXTIO_CALL ExtIoSetSetting( int idx, const char* value )
 {
   if (!gpoSettings)
-    gpoSettings = new RFspaceNetReceiver::Settings();
+    gpoSettings = new RFspaceNetReceiver::Settings(HWMODEL);
 
   int64_t tempI64;
   int    tempInt;
@@ -781,6 +801,9 @@ void EXTIO_CALL ExtIoSetSetting( int idx, const char* value )
     case Setting::ID:
       SDR_settings_valid = ( value && !strcmp( value, SETTINGS_IDENTIFIER ) );
       // make identifier version specific??? - or not ==> never change order of idx!
+      break;
+    case Setting::MODEL:
+      snprintf(gpoSettings->acModel, 32, "%s", value);
       break;
     case Setting::CTRL_IP:
       snprintf(gpoSettings->acCtrlIP, 64, "%s", trimmedIP(value, "CTRL_IP"));
@@ -805,6 +828,9 @@ void EXTIO_CALL ExtIoSetSetting( int idx, const char* value )
     case Setting::SAMPLERATE_IDX:
       gpoSettings->iSampleRateIdx = atoi( value );
       break;
+    case Setting::USE_16BIT_FOR_ALL:
+      gpoSettings->bUse16BitForAll = atoi(value) ? true : false;
+      break;
     case Setting::RCV_FRQ:
       sscanf( value, "%ld", &gpoSettings->iFrequency );
       break;
@@ -814,31 +840,28 @@ void EXTIO_CALL ExtIoSetSetting( int idx, const char* value )
     case Setting::RCV_ATTEN_IDX:
       gpoSettings->iAttenuationIdx = atoi( value );
       break;
-    case Setting::BITDEPTH_CHANGE_SMPRATE:
-      gpoSettings->iBitDepthThresSamplerate = atoi( value );
-      break;
     case Setting::BAND1_RANGE_MINFREQ:
-       gpoSettings->iBand_minFreq = atol( value );
-       break;
+      gpoSettings->iBand_minFreq = atol( value );
+      break;
     case Setting::BAND1_RANGE_MAXFREQ:
       tempI64 = atol(value);
       if (gpoSettings->iBand_minFreq < tempI64) // reject when min > max
         gpoSettings->iBand_maxFreq = tempI64;
        break;
     case Setting::IS_VUHF_RANGE:
-       gpoSettings->bIsVUHFRange = atoi( value ) ? true : false;
-       break;
+      gpoSettings->bIsVUHFRange = atoi( value ) ? true : false;
+      break;
     case Setting::COMPATIBILITY_VALUE:
-       gpoSettings->iCompatibilityValue = atoi( value );
-       break;
+      gpoSettings->iCompatibilityValue = atoi( value );
+      break;
     case Setting::USE_VUHF_MULTIGAIN:
-       gpoSettings->bUseVUHFExpert = atoi( value ) ? true : false;
-       break;
+      gpoSettings->bUseVUHFExpert = atoi( value ) ? true : false;
+      break;
     case Setting::GAIN_CONTROL_MODE:
       snprintf( gpoSettings->acGainControlMode, 63, "%s", value );
       break;
 /*       gpoSettings->bUseVUHFAutoMode = bool(atoi( value ));
-       break;*/
+      break;*/
     case Setting::LNA_VALUE:
       gpoSettings->iLNAValue = atoi( value );
       break;

@@ -19,21 +19,19 @@ public:
 
   static const int EXT_BLOCKLEN = 4096;   /* only multiples of 512 */
 
-  static int getDefaultHWType();
-
   // zu speichernde Einstellungen
   class Settings
   {
   public:
-    Settings()
+    Settings(const char * defaultModel)
     {
-      strcpy(acCtrlIP, "192.168.8.101");  // "10.10.11.2"
+      strcpy(acModel, defaultModel);      // NetSDR / CloudIQ
+      strcpy(acCtrlIP, "192.168.8.100");  // "10.10.11.2"
       strcpy(acDataIP, "");               // ""   main PC: 192.168.8.100  PC2: 192.168.8.102
       uCtrlPortNo = uDataPortNo = 50000;  // 50000  / 50002
       iSampleRateIdx = 2;                 // 2: 32 kHz samplerate
+      bUse16BitForAll = false;            // => use 24 Bit on low samplerates
       iAttenuationIdx = 6;                // 6: 0 dB  - no ATT  & no ADC Gain
-
-      iBitDepthThresSamplerate = 1333333; // 1333.333 kHz == 80 MHz / 60
 
       iBand_minFreq = 0;
       iBand_maxFreq = 34 * 1000L * 1000L; // 0 - 34 MHz
@@ -55,8 +53,24 @@ public:
       mfGainCompensationFactor = 1.0F;
 
       nConnectTimeoutMillis = 1000;
+
+      if (!strcmp(defaultModel, "NetSDR"))
+      {
+        iSampleRateIdx = 2; // => srate 32 kHz
+        uiSamplerate = RFspaceNetReceiver::netsdr_srate_bws[iSampleRateIdx].srate;
+        uiBandwidth = RFspaceNetReceiver::netsdr_srate_bws[iSampleRateIdx].bw;
+        bUse16BitForAll = false;            // => use 24 Bit on low samplerates
+      }
+      else if (!strcmp(defaultModel, "CloudIQ"))
+      {
+        iSampleRateIdx = 4; // => srate 48 kHz
+        uiSamplerate = RFspaceNetReceiver::cloudiq_srate_bws[iSampleRateIdx].srate;
+        uiBandwidth = RFspaceNetReceiver::cloudiq_srate_bws[iSampleRateIdx].bw;
+        bUse16BitForAll = true;             // => use 24 Bit on low samplerates
+      }
     }
 
+    char acModel[32];
     char acCtrlIP[64];
     uint16_t uCtrlPortNo;
 
@@ -66,9 +80,8 @@ public:
     char acGainControlMode[64];
 
     int iSampleRateIdx;
+    bool bUse16BitForAll;
     int iAttenuationIdx;
-
-    int32_t iBitDepthThresSamplerate;
 
     int64_t iBand_minFreq;
     int64_t iBand_maxFreq;
@@ -95,15 +108,26 @@ public:
     int nConnectTimeoutMillis;
   };
 
-  static const struct srate_bw {
-    uint32_t  decim;
-    uint32_t  srate;
-    uint32_t  srateval;
-    uint32_t  bw;
-    const char * srateTxt;
-  } srate_bws[];
 
-  static const int miNumSamplerates;
+  static bool applyHwModel(const RFspaceNetReceiver::Settings &);
+  static int getDefaultHWType();
+
+  struct srate_bw
+  {
+    uint32_t  srate;
+    uint32_t  bw;
+    int maxBitDepth;
+    const char * srateTxt;
+  };
+
+  static const int netsdr_default_srateIdx;
+  static const RFspaceNetReceiver::srate_bw netsdr_srate_bws[];
+  static const int cloudiq_default_srateIdx;
+  static const RFspaceNetReceiver::srate_bw cloudiq_srate_bws[];
+  static const struct srate_bw * srate_bws;
+
+  static int miNumSamplerates;
+  static int miDefaultSrateIdx;
 
   static const float mafAttenuationATTs[];
   static const float mafActualAttenuationATTs[];
@@ -141,13 +165,15 @@ public:
   int64_t getHWLO( void );
   int getAttIdx( void );
   int getSmpRateIdx( uint32_t );
-  int getMaxSmpRateIdx(uint32_t);
+
   const int64_t * getFrequencyRanges( int idx );
 
   int getExtHwSampleFormat() const  { return mExtHwSampleFormat;  }
   int getExtHwBitDepth() const      { return mExtHwBitDepth;      }
 
-  void TimerProc(uint16_t waitMs);
+  void TimerProc(int waitMs);
+
+  void checkReportChangedSamplerates();
 
   RFspaceNetSDRControl rcv;
   RFspaceNetSDRUdpData udp;
@@ -186,17 +212,19 @@ private:
 
   bool mHasDifferentLOFrequency;
 
-  uint16_t mTime;
-  const uint16_t mWaitTimeInMilliseconds = 2000;
-  const uint16_t mUDPWaitTimeInMilliseconds = 2000;
-  const uint16_t mTimeBufferInMilliseconds = 10;
-  uint16_t mTimeWithoutDataInMilliseconds;
-  uint16_t mControlPingTime;
+  int mTime;
+  const int mWaitTimeInMilliseconds = 2000;
+  const int mUDPWaitTimeInMilliseconds = 2000;
+  const int mTimeBufferInMilliseconds = 10;
+  int mTimeWithoutDataInMilliseconds;
+  int mControlPingTime;
   bool mIsUDPRunning;
   uint16_t mNumCallbacks = 0;
   bool mHasLostTCPConntection;
   bool mHasVUHFFreqRange;
   bool mHasOptions;
+
+  volatile bool mReportChangedSamplerates;
 
   int mLastReportedSampleFormat;
   unsigned mLastReportedFmt;
@@ -209,8 +237,8 @@ private:
   ReceiverMode mReceiverMode;
   GainControlMode mGainControlMode;
 
-  int mNetSdrBitDepth;
+  int mDeviceBitDepth;    // 16 / 24
   int mExtHwSampleFormat; // HDSDR enum != bit depth
-  int mExtHwBitDepth;
+  int mExtHwBitDepth;     // 16 / 24 / 32
 };
 

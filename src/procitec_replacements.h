@@ -151,3 +151,16 @@ T PROCLIP(T val, T minVal, T maxVal)
     return val;
 }
 
+inline float PRO_INTN_TO_FLOAT(int16_t v, int)
+{
+  return v * (1.0F / 32768.0F);
+}
+
+inline float PRO_INTN_TO_FLOAT(const LITTLE_INT24_T & r, int)
+{
+  const void *vp = &r.lo - 1;
+  const int32_t *p = (const int32_t *)vp;
+  int32_t v = (*p) & 0xFFFFFF00;
+  return v * (1.0F / 2147483648.0F);
+}
+

@@ -1,16 +1,17 @@
-# ExtIO_RFspaceNetSDR
-Winrad/HDSDR plugin ExtIO for the RFspace NetSDR receiver
+# ExtIO_RFspaceSDR
+Winrad/HDSDR plugin ExtIO for the RFspace NetSDR, NetSDR+ and CloudIQ receiver
 
 URL: https://github.com/hayguen/ExtIO_RFspaceNetSDR
 
 ## Software Defined Radio (SDR) receiver
 
-The hardware receiver was manufactured by RFspace.
+The hardware receiver(s) were/are manufactured by RFspace.
 
 See http://www.rfspace.com/
 
 This software was initially developed for for the NetSDR model.
-It does also run with the NetSDR+.
+It does also run with the compatible NetSDR+ model.
+And also with the different CloudIQ model.
 
 Network protocol specification for the interface is available at
 http://www.moetronix.com/svdownload.htm
@@ -32,12 +33,14 @@ Authors are Sebastian Balthasar and Hayati Ayguen. On questions, contact Hayati 
 ## Step-by-step installation
 
 * install your favorite SDR software, e.g. HDSDR from http://www.hdsdr.de/ .
-Other ExtIO compatible software like Winrad or Studio1 should also work.
+Other ExtIO compatible software like Winrad or Studio1 might also work.
 
 * download ExtIO_RFspaceNetSDR.DLL https://github.com/hayguen/ExtIO_RFspaceNetSDR/releases
 
 * copy downloaded file into your SDR software's installation directory (default=C:\Program Files (x86)\HDSDR).
 Do NOT try to unzip directly into this directory! Because of Windows' user rights management this will fail. Unzip somewhere else first, then copy it to the installation directory.
+
+* start the SDR software and close it again, after getting an error message, caused by wrong configuration.
 
 * Edit one of config_Default-profile.reg (or config_NetSDR-profile.reg) with a Text-Editor,
 e.g. Notepad++. Enter your IP address(es) and check if you need to modify the portnumber.
@@ -49,7 +52,7 @@ you might edit config_NetSDR-profile.reg
 
 * Then doubleclick to import those settings, when HDSDR is closed
 
-* exit and restart SDR software and select ExtIO_RFspaceNetSDR.DLL if demanded
+* exit and restart SDR software and select ExtIO_RFspaceSDR.DLL if demanded
 
 
 ## Compilation notes
@@ -71,5 +74,5 @@ Compiles. In test.
 ExtIO control GUI for configuration is missing! To be implemented ..
 
 Workaround by editing Windows' registry directly with 'regedit.exe' for use with HDSDR.
- Registry path: HKEY_CURRENT_USER\Software\HDSDR\ExtIO_RFspaceNetSDR.dll
+ Registry path: HKEY_CURRENT_USER\Software\HDSDR\ExtIO_RFspaceSDR.dll
 

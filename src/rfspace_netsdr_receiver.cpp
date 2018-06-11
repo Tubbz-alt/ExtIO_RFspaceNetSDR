@@ -18,32 +18,72 @@
 
 #define KHZ *1000
 
-const RFspaceNetReceiver::srate_bw RFspaceNetReceiver::srate_bws[] =
+// NetSDR A/D Converter frequency = 80 MHz
+static const uint32_t NETSDR_ADC_FREQ = 80 * 1000 * 1000;
+const int RFspaceNetReceiver::netsdr_default_srateIdx = 2;  // == 32 kHz
+
+const RFspaceNetReceiver::srate_bw RFspaceNetReceiver::netsdr_srate_bws[] =
 {
-  { 6400, uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_12kHz  ), 12500,      10 KHZ, "12.5 kHz"  }  // 0
-, { 5000, uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_16kHz  ),   16 KHZ,   12 KHZ, "16 kHz"    }
-, { 2500, uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_32kHz  ),   32 KHZ,   25 KHZ, "32 kHz"    }
-, { 1280, uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_62kHz  ), 62500,      50 KHZ, "62.5 kHz"  }
-, { 1000, uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_80kHz  ),   80 KHZ,   64 KHZ, "80 kHz"    }
-, { 800,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_100kHz ),  100 KHZ,   80 KHZ, "100 kHz"   }  // 5
-, { 640,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_125kHz ),  125 KHZ,  100 KHZ, "125 kHz"   }
-, { 500,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_160kHz ),  160 KHZ,  128 KHZ, "160 kHz"   }
-, { 400,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_200kHz ),  200 KHZ,  160 KHZ, "200 kHz"   }
-, { 320,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_250kHz ),  250 KHZ,  200 KHZ, "250 kHz"   }
-, { 256,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_312kHz ), 312500,    250 KHZ, "312.5 kHz" }  // 10
-, { 200,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_400kHz ),  400 KHZ,  320 KHZ, "400 kHz"   }
-, { 160,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_500kHz ),  500 KHZ,  400 KHZ, "500 kHz"   }
-, { 128,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_625kHz ),  625 KHZ,  500 KHZ, "625 kHz"   }
-, { 100,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_800kHz ),  800 KHZ,  640 KHZ, "800 kHz"   }
-, {  80,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_1000kHz), 1000 KHZ,  800 KHZ, "1 MHz"     }  // 15
-, {  64,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_1250kHz), 1250 KHZ, 1000 KHZ, "1.25 MHz"  }
-, {  52,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_1538kHz), 1538461,  1200 KHZ, "1.538 MHz" }
-, {  48,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_1666kHz), 1666666,  1300 KHZ, "1.666 MHz" }
-, {  44,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_1818kHz), 1818181,  1400 KHZ, "1.818 MHz" }
-, {  40,  uint32_t(RFspaceNetSDRControl::IQOutSmpRate::SR_2000kHz), 2000 KHZ, 1600 KHZ, "2 MHz"     }  // 20
+    { 12500, 10 KHZ, 24, "12.5 kHz" }  // 0
+  , { 16 KHZ, 12 KHZ, 24, "16 kHz" }
+  , { 32 KHZ, 25 KHZ, 24, "32 kHz" }    // 2
+  , { 62500, 50 KHZ, 24, "62.5 kHz" }
+  , { 80 KHZ, 64 KHZ, 24, "80 kHz" }
+  , { 100 KHZ, 80 KHZ, 24, "100 kHz" }  // 5
+  , { 125 KHZ, 100 KHZ, 24, "125 kHz" }
+  , { 160 KHZ, 128 KHZ, 24, "160 kHz" }
+  , { 200 KHZ, 160 KHZ, 24, "200 kHz" }
+  , { 250 KHZ, 200 KHZ, 24, "250 kHz" }
+  , { 312500, 250 KHZ, 24, "312.5 kHz" }  // 10
+  , { 400 KHZ, 320 KHZ, 24, "400 kHz" }
+  , { 500 KHZ, 400 KHZ, 24, "500 kHz" }
+  , { 625 KHZ, 500 KHZ, 24, "625 kHz" }
+  , { 800 KHZ, 640 KHZ, 24, "800 kHz" }
+  , { 1000 KHZ, 800 KHZ, 24, "1 MHz" }  // 15
+  , { 1250 KHZ, 1000 KHZ, 24, "1.25 MHz" }
+  , { 1538461, 1200 KHZ, 16, "1.538 MHz" }
+  , { 1666666, 1300 KHZ, 16, "1.666 MHz" }
+  , { 1818181, 1400 KHZ, 16, "1.818 MHz" }
+  , { 2000 KHZ, 1600 KHZ, 16, "2 MHz" }  // 20
+};
+
+// CloudIQ A/D Converter frequency = 122.88 MHz
+static const uint32_t CLOUDIQ_ADC_FREQ = 122880 * 1000;
+const int RFspaceNetReceiver::cloudiq_default_srateIdx = 0; // == 48 kHz
+
+const RFspaceNetReceiver::srate_bw RFspaceNetReceiver::cloudiq_srate_bws[] =
+{
+  // , { 12 KHZ, 9 KHZ, 24, "12 kHz" }  // 0
+  // , { 16 KHZ, 12 KHZ, 24, "16 kHz" }
+  // , { 24 KHZ, 19 KHZ, 24, "24 kHz" }
+  // , { 32 KHZ, 25 KHZ, 24, "32 kHz" }
+    { 48 KHZ, 38 KHZ, 24, "48 kHz" }    // 0
+  , { 64 KHZ, 51 KHZ, 24, "64 kHz" }
+  , { 96 KHZ, 76 KHZ, 24, "96 kHz" }
+  , { 128 KHZ, 102 KHZ, 24, "128 kHz" }
+  , { 160 KHZ, 128 KHZ, 24, "160 kHz" }
+  , { 192 KHZ, 153 KHZ, 24, "192 kHz" } // 5
+  , { 256 KHZ, 204 KHZ, 24, "256 kHz" }
+  , { 384 KHZ, 307 KHZ, 24, "384 kHz" }
+  , { 512 KHZ, 409 KHZ, 24, "512 kHz" }
+  , { 640 KHZ, 512 KHZ, 24, "640 kHz" }
+  , { 768 KHZ, 614 KHZ, 24, "768 kHz" } // 10
+  , { 960 KHZ, 768 KHZ, 24, "960 kHz" }
+  , { 1024 KHZ, 819 KHZ, 24, "1024 kHz" }
+  , { 1280 KHZ, 1024 KHZ, 24, "1280 kHz" }
+  , { 1536 KHZ, 1228 KHZ, 16, "1536 kHz" }
+  , { 1616842, 1290 KHZ, 16, "1616.8 kHz" }   // 15: divisor=76
+  , { 1706666, 1365 KHZ, 16, "1706.6 kHz" }
+  , { 1807058, 1445 KHZ, 16, "1807.1 kHz" }   // divisor=68
+  //, { 1920 KHZ, 1536 KHZ, 16, "1920 kHz" }    // divisor=64 -> stuttering
+  //, { 2048 KHZ, 1638 KHZ, 16, "2048 kHz" }    // divisor=60 -> stuttering
 };
 
 #undef KHZ
+
+const RFspaceNetReceiver::srate_bw * RFspaceNetReceiver::srate_bws = netsdr_srate_bws;
+int RFspaceNetReceiver::miNumSamplerates = (int)(NUMEL(RFspaceNetReceiver::netsdr_srate_bws));
+int RFspaceNetReceiver::miDefaultSrateIdx = RFspaceNetReceiver::netsdr_default_srateIdx;
 
 //                                                               0       1        2      3       4       5     6     7
 const float RFspaceNetReceiver::mafAttenuationATTs[]       = { -30.0F, -30.0F, -20.0F, -20.0F, -10.0F, -10.0F, 0.0F, 0.0F };
@@ -65,9 +105,34 @@ const RFspaceNetSDRControl::RfGain RFspaceNetReceiver::mVUHF_RFGainAttenuations[
 const int RFspaceNetReceiver::miNumAttenuations = (int)( NUMEL(mafAttenuationATTs) );
 const int RFspaceNetReceiver::miNumCompatibilityGains = (int)( sizeof(mafVUHFCompatibilityGainValues) / sizeof(mafVUHFCompatibilityGainValues[0]) );
 const int RFspaceNetReceiver::miNumMultiGains = (int)( sizeof(mafVUHFMultiGainValues) / sizeof(mafVUHFMultiGainValues[0]) );
-const int RFspaceNetReceiver::miNumSamplerates = (int)(sizeof(srate_bws) / sizeof(srate_bws[0]));
 
 #define NORMALIZE_DATA 0
+
+
+bool RFspaceNetReceiver::applyHwModel(const RFspaceNetReceiver::Settings & roSet)
+{
+  if (!strcmp(roSet.acModel, "NetSDR"))
+  {
+    if (srate_bws != netsdr_srate_bws)
+    {
+      srate_bws = netsdr_srate_bws;
+      miNumSamplerates = (int)(NUMEL(netsdr_srate_bws));
+      miDefaultSrateIdx = netsdr_default_srateIdx;
+      return true;
+    }
+  }
+  else if (!strcmp(roSet.acModel, "CloudIQ"))
+  {
+    if (srate_bws != cloudiq_srate_bws)
+    {
+      srate_bws = cloudiq_srate_bws;
+      miNumSamplerates = (int)(NUMEL(cloudiq_srate_bws));
+      miDefaultSrateIdx = cloudiq_default_srateIdx;
+      return true;
+    }
+  }
+  return false;
+}
 
 
 int RFspaceNetReceiver::getDefaultHWType()
@@ -149,6 +214,8 @@ RFspaceNetReceiver::RFspaceNetReceiver()
   mHasVUHFFreqRange = true;
   mHasOptions = false;
 
+  mReportChangedSamplerates = false;
+
   mStartUDPTimer = 0;
   mStartData = false;
 
@@ -156,13 +223,13 @@ RFspaceNetReceiver::RFspaceNetReceiver()
 
   mGainControlMode = GainControlMode::AUTO;
 
-  mNetSdrBitDepth = 16;
+  mDeviceBitDepth = 16;
 #if NORMALIZE_DATA
   mLastReportedSampleFormat = mExtHwSampleFormat = extHw_SampleFormat_FLT32;
   mExtHwBitDepth = 32;
 #else
-  mLastReportedSampleFormat = mExtHwSampleFormat = (mNetSdrBitDepth == 24) ? extHw_SampleFormat_PCM24 : extHw_SampleFormat_PCM16;
-  mExtHwBitDepth = (mNetSdrBitDepth == 24) ? 24 : 16;
+  mLastReportedSampleFormat = mExtHwSampleFormat = (mDeviceBitDepth == 24) ? extHw_SampleFormat_PCM24 : extHw_SampleFormat_PCM16;
+  mExtHwBitDepth = (mDeviceBitDepth == 24) ? 24 : 16;
 #endif
 }
 
@@ -183,27 +250,29 @@ void RFspaceNetReceiver::receiveRfspaceNetSDRUdpData(const unsigned fmt, const v
   mTimeWithoutDataInMilliseconds = 0;
   if (!mExtIOCallbackPtr)
   {
-    LOG_PRO(LOG_ERROR, "RFspaceNetReceiver::receiveRfspaceNetSDRUdpData(): mExtIOCallbackPtr == NULL");
+    LOG_PRO(LOG_ERROR, "<-- RFspaceNetReceiver::receiveRfspaceNetSDRUdpData(): mExtIOCallbackPtr == NULL");
     return;
   }
+  if (!rcv.dataStreamShouldRun())
+    return;
 
   if (mLastReportedFmt != fmt || bSequenceNumError)
   {
     mSampleBufferLenInFrames = 0;
     if (!fmt || fmt > 4)
-      LOG_PRO(LOG_ERROR, "Received format %u of sample data from UDP is unknown!", mLastReportedFmt);
+      LOG_PRO(LOG_ERROR, "<-- Received format %u of sample data from UDP is unknown!", mLastReportedFmt);
 
-    mNetSdrBitDepth = (fmt <= 2) ? 16 : 24;
+    mDeviceBitDepth = (fmt <= 2) ? 16 : 24;
 #if NORMALIZE_DATA
     mExtHwSampleFormat = extHw_SampleFormat_FLT32;
     mExtHwBitDepth = 32;
 #else
-    mExtHwSampleFormat = (mNetSdrBitDepth == 24) ? extHw_SampleFormat_PCM24 : extHw_SampleFormat_PCM16;
-    mExtHwBitDepth = (mNetSdrBitDepth == 24) ? 24 : 16;
+    mExtHwSampleFormat = (mDeviceBitDepth == 24) ? extHw_SampleFormat_PCM24 : extHw_SampleFormat_PCM16;
+    mExtHwBitDepth = (mDeviceBitDepth == 24) ? 24 : 16;
 #endif
     if (mLastReportedSampleFormat != mExtHwSampleFormat)
     {
-      LOG_PRO(LOG_ERROR, "SEND STATUS CHANGE TO SDR: NEW BIT DEPTH %d Bit. while running => ERROR!.", mExtHwBitDepth);
+      LOG_PRO(LOG_ERROR, "<-- SEND STATUS CHANGE TO SDR: NEW BIT DEPTH %d Bit. while running => ERROR!.", mExtHwBitDepth);
       EXTIO_STATUS_CHANGE(mExtIOCallbackPtr, mExtHwSampleFormat);
       mLastReportedSampleFormat = mExtHwSampleFormat;
     }
@@ -249,7 +318,7 @@ void RFspaceNetReceiver::receiveRfspaceNetSDRUdpData(const unsigned fmt, const v
         numFramesToProcFromInput = (EXT_BLOCKLEN - mSampleBufferLenInFrames);
 
       for ( int k = 0; k < numFramesToProcFromInput*2; ++k )
-        mSampleBufferFlt[mSampleBufferLenInFrames*2 + k] = PRO_INTN_TO_FLOAT( int32_t( puInputSamples[srcFrameOffset*2 + k] ), 24 ) * factor;
+        mSampleBufferFlt[mSampleBufferLenInFrames*2 + k] = PRO_INTN_TO_FLOAT( puInputSamples[srcFrameOffset*2 + k], 24 ) * factor;
       mSampleBufferLenInFrames += numFramesToProcFromInput;
 
       if ( mSampleBufferLenInFrames == EXT_BLOCKLEN )
@@ -328,19 +397,18 @@ void RFspaceNetReceiver::receiveRFspaceNetSDRControlInfo(Info info)
       int64_t actualFrequency = rcv.getRcvFrequency(&pbOk);
       if(pbOk)
       {
-        EXTIO_STATUS_CHANGE(mExtIOCallbackPtr , extHw_Changed_LO );
         if(actualFrequency != mpoSettings->iFrequency || mHasDifferentLOFrequency)
         {
           mpoSettings->iFrequency = actualFrequency;
-          LOG_PRO( LOG_ERROR, " RECEIVED CALLBACK WITH UNEXPECTED FREQUENCY : %ld Hz ", long(actualFrequency) );
+          LOG_PRO(LOG_ERROR, "<-- RECEIVED CALLBACK WITH UNEXPECTED LO FREQUENCY : %ld Hz ", long(actualFrequency) );
           mHasDifferentLOFrequency = false;
+          EXTIO_STATUS_CHANGE(mExtIOCallbackPtr, extHw_Changed_LO);
         }
         else
-          LOG_PRO( LOG_DEBUG, " RECEIVED CALLBACK WITH EXPECTED FREQUENCY : %ld Hz ", long(actualFrequency) );
+          LOG_PRO(LOG_DEBUG, "<-- RECEIVED CALLBACK WITH EXPECTED LO FREQUENCY : %ld Hz ", long(actualFrequency) );
       }
       else
-        LOG_PRO( LOG_DEBUG, " RECEIVED CALLBACK WITH ERRONEOUS RETURN OF FREQUENCY : %ld Hz --> ERROR !", long(actualFrequency) );
-
+        LOG_PRO(LOG_DEBUG, "<-- RECEIVED CALLBACK WITH ERRONEOUS RETURN OF LO FREQUENCY : %ld Hz --> ERROR !", long(actualFrequency) );
 
       pbOk = false;
       const int64_t * actualFrequencyRange = rcv.getRcvFrequencyRanges(&pbOk);
@@ -369,11 +437,11 @@ void RFspaceNetReceiver::receiveRFspaceNetSDRControlInfo(Info info)
 
               mpoSettings->mfGainCompensationFactor = 1.0F / ( pow(10.0F,(mafActualAttenuationATTs[mpoSettings->iControlValue]/20.0F)) ); // log20 to linear --> lin = 10 ^ (db/20)  (voltage)
 
-              LOG_PRO( LOG_ERROR, " RECEIVED CALLBACK WITH UNEXPECTED RF_GAIN : %d dB. New RFGainIdx : %d",  mRFGaindB,  mpoSettings->iControlValue);
+              LOG_PRO(LOG_ERROR, "<-- RECEIVED CALLBACK WITH UNEXPECTED RF_GAIN : %d dB. New RFGainIdx : %d",  mRFGaindB,  mpoSettings->iControlValue);
               EXTIO_STATUS_CHANGE(mExtIOCallbackPtr , extHw_Changed_ATT );
             }
             else
-              LOG_PRO( LOG_DEBUG, " RECEIVED CALLBACK WITH EXPECTED RF_GAIN : %d dB. New RFGainIdx : %d",  mRFGaindB,  mpoSettings->iControlValue);
+              LOG_PRO(LOG_DEBUG, "<-- RECEIVED CALLBACK WITH EXPECTED RF_GAIN : %d dB. New RFGainIdx : %d",  mRFGaindB,  mpoSettings->iControlValue);
 
             break;
           }
@@ -384,7 +452,7 @@ void RFspaceNetReceiver::receiveRFspaceNetSDRControlInfo(Info info)
               mRFGaindB = actualRFGain;
               mpoSettings->iControlValue = getAttIdx();
 
-              LOG_PRO( LOG_ERROR, " RECEIVED CALLBACK WITH UNEXPECTED COMPATIBILITY_GAIN_VALUE : %d",  mpoSettings->iControlValue);
+              LOG_PRO(LOG_ERROR, "<-- RECEIVED CALLBACK WITH UNEXPECTED COMPATIBILITY_GAIN_VALUE : %d",  mpoSettings->iControlValue);
               EXTIO_STATUS_CHANGE(mExtIOCallbackPtr , extHw_Changed_ATT );
             }
 
@@ -393,15 +461,14 @@ void RFspaceNetReceiver::receiveRFspaceNetSDRControlInfo(Info info)
           case ReceiverMode::VUHF_EXP:
             break; // no implementation of VUHF_EXP in this Callback
           default:
-            LOG_PRO( LOG_ERROR, "*** SWITCH CASE ERROR:  UNKNOWN RECEIVER MODE !");
+            LOG_PRO(LOG_ERROR, "<-- UNKNOWN RECEIVER MODE !");
         }
       }
       else
         if(mReceiverMode == ReceiverMode::HF)
-          LOG_PRO( LOG_DEBUG, " RECEIVED CALLBACK WITH ERRONEOUS RETURN OF RF_GAIN : %d --> ERROR !", actualRFGain );
+          LOG_PRO(LOG_DEBUG, " <-- RECEIVED CALLBACK WITH ERRONEOUS RETURN OF RF_GAIN : %d --> ERROR !", actualRFGain );
         else
-          LOG_PRO( LOG_DEBUG, " RECEIVED CALLBACK WITH ERRONEOUS RETURN OF COMPATIBILITY_GAIN_VALUE --> ERROR !" );
-
+          LOG_PRO(LOG_DEBUG, "<-- RECEIVED CALLBACK WITH ERRONEOUS RETURN OF COMPATIBILITY_GAIN_VALUE --> ERROR !" );
 
       break;
     }
@@ -444,15 +511,15 @@ void RFspaceNetReceiver::receiveRFspaceNetSDRControlInfo(Info info)
 
           mpoSettings->mfGainCompensationFactor = 1.0F / ( pow(10.0F,(mafActualAttenuationATTs[mpoSettings->iControlValue]/20.0F)) ); // log20 to linear --> lin = 10 ^ (db/20)  (voltage)
 
-          LOG_PRO( LOG_ERROR, " RECEIVED CALLBACK WITH UNEXPECTED AD_GAIN : %.1f . New GainIdx : %d ",  mADGain, mpoSettings->iControlValue);
+          LOG_PRO(LOG_ERROR, "<-- RECEIVED CALLBACK WITH UNEXPECTED AD_GAIN : %.1f . New GainIdx : %d ",  mADGain, mpoSettings->iControlValue);
           EXTIO_STATUS_CHANGE(mExtIOCallbackPtr , extHw_Changed_ATT ); // Different Gains (RFGain and MGC) are summed up in Attenuation "ATT"
         }
         else
-          LOG_PRO( LOG_DEBUG, " RECEIVED CALLBACK WITH EXPECTED AD_GAIN : %.1f . New GainIdx : %d ",  mADGain, mpoSettings->iControlValue);
+          LOG_PRO(LOG_DEBUG, "<-- RECEIVED CALLBACK WITH EXPECTED AD_GAIN : %.1f . New GainIdx : %d ",  mADGain, mpoSettings->iControlValue);
 
       }
       else
-        LOG_PRO( LOG_DEBUG, " RECEIVED CALLBACK WITH ERRONEOUS RETURN OF AD_GAIN : %.1f --> ERROR ! ", actualADGain);
+        LOG_PRO(LOG_DEBUG, "<-- RECEIVED CALLBACK WITH ERRONEOUS RETURN OF AD_GAIN : %.1f --> ERROR ! ", actualADGain);
 
       break;
     }
@@ -464,18 +531,18 @@ void RFspaceNetReceiver::receiveRFspaceNetSDRControlInfo(Info info)
       {
         if(actualIQSmpRate != mpoSettings->uiLastReportedSamplerate) //Debug ==
         {
+          LOG_PRO(LOG_ERROR, "<-- RECEIVED CALLBACK WITH UNEXPECTED IQ_OUT_SAMPLERATE %u Hz. Expected was %u Hz", actualIQSmpRate, mpoSettings->uiLastReportedSamplerate);
           mpoSettings->uiSamplerate = actualIQSmpRate;
           mpoSettings->uiLastReportedSamplerate = mpoSettings->uiSamplerate;
           mpoSettings->iSampleRateIdx = getSmpRateIdx(actualIQSmpRate);
           mpoSettings->uiBandwidth = srate_bws[mpoSettings->iSampleRateIdx].bw;
-          LOG_PRO( LOG_ERROR, " RECEIVED CALLBACK WITH UNEXPECTED IQ_OUT_SAMPLERATE : %u Hz", actualIQSmpRate);
           EXTIO_STATUS_CHANGE(mExtIOCallbackPtr , extHw_Changed_SampleRate );
         }
         else
-          LOG_PRO( LOG_DEBUG, " RECEIVED CALLBACK WITH EXPECTED IQ_OUT_SAMPLERATE : %u Hz", actualIQSmpRate);
+          LOG_PRO(LOG_DEBUG, "<-- RECEIVED CALLBACK WITH EXPECTED IQ_OUT_SAMPLERATE : %u Hz", actualIQSmpRate);
       }
       else
-        LOG_PRO( LOG_DEBUG, " RECEIVED CALLBACK WITH ERRONEOUS RETURN OF IQ_OUT_SAMPLERATE :  %d Hz -->  ERROR !", actualIQSmpRate );
+        LOG_PRO(LOG_DEBUG, "<-- RECEIVED CALLBACK WITH ERRONEOUS IQ_OUT_SAMPLERATE :  %d Hz -->  ERROR !", actualIQSmpRate );
 
       break;
     }
@@ -487,13 +554,25 @@ void RFspaceNetReceiver::receiveRFspaceNetSDRControlInfo(Info info)
     {
       mControlPingTime = 0;
       bool bOk = false;
-      bool isUDPRunning = rcv.isUDPDataStreamRunning(&bOk);
-      if(bOk)
+      const bool isUDPRunning = rcv.isUDPDataStreamRunning(&bOk);
+      const bool bChanged = (mIsUDPRunning != isUDPRunning);
+      if (bOk && bChanged)
       {
+        LOG_PRO(LOG_DEBUG, "<-- RECEIVED CALLBACK WITH RCV_STATE --> now UDP state changed to '%s'"
+          , (isUDPRunning ? "running" : "stopped"));
         mIsUDPRunning = isUDPRunning;
       }
-      else
-        LOG_PRO( LOG_DEBUG, " RECEIVED CALLBACK WITH ERRONEOUS RETURN OF RCV_STATE -->  ERROR !" );
+      else if (!bOk)
+        LOG_PRO(LOG_DEBUG, "<-- RECEIVED CALLBACK WITH ERRONEOUS RETURN OF RCV_STATE -->  ERROR !" );
+
+
+      const int bitDepth = rcv.getStreamBitDepth(&bOk);
+      const bool isRunning = rcv.isUDPDataStreamRunning(&bOk);
+      if (bOk && rcv.dataStreamShouldRun())
+      {
+        if (mDeviceBitDepth != bitDepth)
+          LOG_PRO(LOG_DEBUG, "<-- RECEIVED CALLBACK WITH RCV_STATE --> RCV_STATE bitDepth %d differs from expected %d Bit @ %u", bitDepth, mDeviceBitDepth, mpoSettings->uiSamplerate);
+      }
 
       break;
     }
@@ -509,9 +588,30 @@ void RFspaceNetReceiver::receiveRFspaceNetSDRControlInfo(Info info)
           {
             mHasVUHFFreqRange = mReceiverOptions.DownConverterBoard_Present;
             mHasOptions = true;
-            LOG_PRO( LOG_DEBUG, " RECEIVED CALLBACK WITH OPTIONS !" );
+            LOG_PRO(LOG_DEBUG, "<-- RECEIVED CALLBACK WITH OPTIONS !" );
           }
         }
+      break;
+    }
+
+    case Info::SET_TARGET:
+    {
+      bool bOk;
+      const char * pTarget = rcv.getTargetName(&bOk);
+      if (bOk)
+      {
+        strcpy(mpoSettings->acModel, pTarget);
+        bool bAppliedTargetSrates = applyHwModel(*mpoSettings);
+        if (bAppliedTargetSrates)
+        {
+          LOG_PRO(LOG_PROTOCOL, "<-- RECEIVED CALLBACK WITH TARGET '%s' - modified Samplerates", pTarget);
+          mReportChangedSamplerates = true;
+        }
+        else
+          LOG_PRO(LOG_PROTOCOL, "<-- RECEIVED CALLBACK WITH TARGET '%s' - unknown or same target", pTarget);
+      }
+      else
+        LOG_PRO(LOG_ERROR, "<-- RECEIVED CALLBACK WITH unknown/erroneous TARGET");
       break;
     }
 
@@ -528,19 +628,19 @@ bool RFspaceNetReceiver::openHW(Settings * poSettings)
   bool bTCPConnOK = rcv.connect( mpoSettings->acCtrlIP, mpoSettings->uCtrlPortNo, mpoSettings->nConnectTimeoutMillis );
   if ( !bTCPConnOK )
   {
-    LOG_PRO( LOG_ERROR, "Error connecting to receiver %s:%u for control", mpoSettings->acCtrlIP, mpoSettings->uCtrlPortNo );
+    LOG_PRO( LOG_ERROR, "*** *** RFspaceNetReceiver::openHW(): Error connecting to receiver %s:%u for control", mpoSettings->acCtrlIP, mpoSettings->uCtrlPortNo );
     return false;
   }
 
   poSettings->bIsTCPConnected = true;
 
   int samplerateIdx = poSettings->iSampleRateIdx;
-  samplerateIdx = PROCLIP(samplerateIdx, 0, int(NUMEL(srate_bws)));
-
-  poSettings->uiSamplerate = srate_bws[samplerateIdx].srate;
-  LOG_PRO( LOG_DEBUG, "********************************** RFspaceNetReceiver::openHW() : SENDING SAMPLERATE FREQUENCY TO NETSDR: %dHz (idx: %d)", poSettings->uiSamplerate,  poSettings->iSampleRateIdx);
+  samplerateIdx = PROCLIP(samplerateIdx, 0, miNumSamplerates - 1);
 
   poSettings->iSampleRateIdx = samplerateIdx;
+  poSettings->uiSamplerate = srate_bws[samplerateIdx].srate;
+  poSettings->uiBandwidth = srate_bws[samplerateIdx].bw;
+  LOG_PRO(LOG_DEBUG, "*** *** RFspaceNetReceiver::openHW()");
 
   if(!poSettings->bIsVUHFRange)
   {
@@ -589,28 +689,36 @@ bool RFspaceNetReceiver::openHW(Settings * poSettings)
     }
   }
 
+  LOG_PRO(LOG_DEBUG, "*** *** * RFspaceNetReceiver::openHW() -> calling setGain()");
   setGain(poSettings->iControlValue);
-  rcv.setIQOutSmpRate( RFspaceNetSDRControl::IQOutSmpRate(poSettings->uiSamplerate) );
+  LOG_PRO(LOG_DEBUG, "*** *** * RFspaceNetReceiver::openHW() -> calling setRFFilterSelection()");
   rcv.setRFFilterSelection(RFspaceNetSDRControl::RfFilterSel::F_AUTO); // arg1 -> Filter Selection
-  rcv.setUPDPacketSize( RFspaceNetSDRControl::UDPPacketSize::LARGE );
+  LOG_PRO(LOG_DEBUG, "*** *** * RFspaceNetReceiver::openHW() -> calling setUPDPacketSize()");
+  rcv.setUPDPacketSize(RFspaceNetSDRControl::UDPPacketSize::LARGE);
   //rcv.setRcvADAmplScale( 0.5 ); // arg1 -> Skalierung
-
+  LOG_PRO(LOG_DEBUG, "*** *** * RFspaceNetReceiver::openHW() -> calling setIQOutSmpRate(%u Hz)", poSettings->uiSamplerate);
+  rcv.setIQOutSmpRate(poSettings->uiSamplerate);
   return true;
 }
 
 bool RFspaceNetReceiver::startHW(int64_t LOfreq)
 {
-  if(!mpoSettings->bIsSocketBound)
+  LOG_PRO(LOG_DEBUG, "*** *** RFspaceNetReceiver::startHW() called");
+  if (!mpoSettings->bIsSocketBound)
   {
     //initial binding and start streaming
-    LOG_PRO(LOG_DEBUG, "Binding %s:%u for UDP data reception", mpoSettings->acDataIP, mpoSettings->uDataPortNo);
-    bool bBindOK = udp.bindIfc( mpoSettings->acDataIP, mpoSettings->uDataPortNo );
+    const uint32_t ipSend = (mpoSettings->acDataIP[0]) ? CSimpleSocket::GetIPv4AddrInfoStatic(mpoSettings->acDataIP) : 0;
+    const uint16_t uDataPort = (ipSend) ? mpoSettings->uDataPortNo : mpoSettings->uCtrlPortNo;
+
+    LOG_PRO(LOG_DEBUG, "*** *** * Binding %s:%u for UDP data reception", mpoSettings->acDataIP, uDataPort);
+    bool bBindOK = udp.bindIfc(mpoSettings->acDataIP, uDataPort);
     if ( !bBindOK )
     {
-      LOG_PRO( LOG_ERROR, "Error binding to socket %s:%u for UDP data reception", mpoSettings->acDataIP, mpoSettings->uDataPortNo );
+      LOG_PRO(LOG_ERROR, "*** *** * Error binding to socket %s:%u for UDP data reception", mpoSettings->acDataIP, uDataPort);
       return false;
     }
-    rcv.setUDPInterface( mpoSettings->acDataIP, mpoSettings->uDataPortNo );
+    if (ipSend)
+      rcv.setUDPInterface(mpoSettings->acDataIP, uDataPort);
 
     mpoSettings->bIsSocketBound = true;
   }
@@ -626,7 +734,8 @@ bool RFspaceNetReceiver::startHW(int64_t LOfreq)
   {
     //restart udp data (24bit/16bit) after "mStartUDPTimer" ms in "TimerProc" --> NetSDR sometimes streams wrong bitrate (although claiming it would stream the right bitrate).
     //--> give samplerate change (and sometimes therefore bitdepth change) more time.
-    mStartUDPTimer = 200; //in ms
+    mStartUDPTimer = 50;  //in ms
+    LOG_PRO(LOG_DEBUG, "*** *** * RFspaceNetReceiver::startHW(): will command to start streaming in %d ms", mStartUDPTimer);
     mStartData = true;
   }
 
@@ -636,31 +745,28 @@ bool RFspaceNetReceiver::startHW(int64_t LOfreq)
 
 void RFspaceNetReceiver::setHWLO( int64_t LOFreq )
 {
-
-  if( LOFreq >= VUHF_FREQUENCY && !mHasVUHFFreqRange && mHasOptions)
+  //if( LOFreq >= VUHF_FREQUENCY && !mHasVUHFFreqRange && mHasOptions)
+  //{
+  //  LOG_PRO( LOG_ERROR, "*** *** RFspaceNetReceiver::setHWLO(): RECEIVER SEEMS TO HAVE NO DOWNCONVERTER HARDWARE FOR VUHF FREQUENCY RANGE --> SETTING FREQUENCY TO 10MHZ !");
+  //  int64_t defaultFreq = 10*1000*1000;
+  //  rcv.setRcvFreq( defaultFreq );
+  //  mpoSettings->iFrequency = defaultFreq;
+  //  return;
+  //}
+  //else
   {
-    LOG_PRO( LOG_ERROR, "**** RECEIVER SEEMS TO HAVE NO DOWNCONVERTER HARDWARE FOR VUHF FREQUENCY RANGE --> SETTING FREQUENCY TO 10MHZ !");
-    int64_t defaultFreq = 10*1000*1000;
-    rcv.setRcvFreq( defaultFreq );
-    mpoSettings->iFrequency = defaultFreq;
-    return;
-  }
-  else
-  {
-    LOG_PRO( LOG_DEBUG, "RFspaceNetReceiver::setHWLO() : RECEIVED LOFreq : %ld Hz", long(LOFreq));
-
+    LOG_PRO( LOG_DEBUG, "*** *** RFspaceNetReceiver::setHWLO(%ld Hz) called", long(LOFreq));
     int64_t actualSetLOFreq = LOFreq;
 
     //Set frequency according to available frequency ranges (information received from NetSDR)
-    if(LOFreq < mpoSettings->iBand_minFreq || LOFreq > mpoSettings->iBand_maxFreq)
-    {
-      actualSetLOFreq =  PROCLIP( LOFreq, mpoSettings->iBand_minFreq, mpoSettings->iBand_maxFreq);
-      mHasDifferentLOFrequency = true;
-      LOG_PRO( LOG_ERROR, "RFspaceNetReceiver::setHWLO(%ld) : OUT OF AVAILABLE FREQUENCY RANGE! SETTING mpoSettings->iFrequency = %ld Hz", long(LOFreq), long(actualSetLOFreq));
-    }
-    else
-      LOG_PRO( LOG_DEBUG, "RFspaceNetReceiver::setHWLO(%ld) : SETTING mpoSettings->iFrequency = %ld Hz", long(LOFreq), long(actualSetLOFreq));
-
+    //if(LOFreq < mpoSettings->iBand_minFreq || LOFreq > mpoSettings->iBand_maxFreq)
+    //{
+    //  actualSetLOFreq =  PROCLIP( LOFreq, mpoSettings->iBand_minFreq, mpoSettings->iBand_maxFreq);
+    //  mHasDifferentLOFrequency = true;
+    //  LOG_PRO( LOG_ERROR, "*** *** * RFspaceNetReceiver::setHWLO(%ld) : OUT OF AVAILABLE FREQUENCY RANGE! SETTING mpoSettings->iFrequency = %ld Hz", long(LOFreq), long(actualSetLOFreq));
+    //}
+    //else
+    //  LOG_PRO( LOG_DEBUG, "*** *** * RFspaceNetReceiver::setHWLO(%ld) : SETTING mpoSettings->iFrequency = %ld Hz", long(LOFreq), long(actualSetLOFreq));
 
     if(mpoSettings->iFrequency != actualSetLOFreq)
     {
@@ -672,7 +778,6 @@ void RFspaceNetReceiver::setHWLO( int64_t LOFreq )
 
 void RFspaceNetReceiver::setGain( int idx )
 {
-
   switch(mReceiverMode)
   {
     case ReceiverMode::HF:
@@ -691,7 +796,7 @@ void RFspaceNetReceiver::setGain( int idx )
         rcv.setADModes(mIsDithering, RFspaceNetSDRControl::ADGain::ADGain_1_5);
 
       rcv.setRFGain(RFspaceNetSDRControl::RfGain(mRFGaindB));
-      LOG_PRO( LOG_DEBUG, "setting ADGain = %f, RFGain %d for Att Idx = %i", mADGain, mRFGaindB, mpoSettings->iControlValue);
+      LOG_PRO( LOG_DEBUG, "*** *** setting ADGain = %f, RFGain %d for Att Idx = %i", mADGain, mRFGaindB, mpoSettings->iControlValue);
 
       mpoSettings->iControlValue = idx;
       break;
@@ -705,7 +810,7 @@ void RFspaceNetReceiver::setGain( int idx )
       mRFGaindB = int(mVUHF_RFGainAttenuations[idx]); // has ot be set here
       rcv.setRFGain(mVUHF_RFGainAttenuations[idx]); // in VUHF Compatibility Mode: Auto Gain -> -30dB ; Low Gain -> -20dB; Medium Gain -> -10dB; High Gain -> 0dB
       // --> So we can use madAttenuationATTs[] for VUHF Compatibility Settings
-      LOG_PRO( LOG_DEBUG, "setting Compatibility Value Idx : %d", idx);
+      LOG_PRO( LOG_DEBUG, "*** *** setting Compatibility Value Idx : %d", idx);
 
       mpoSettings->iControlValue = idx;
       break;
@@ -743,7 +848,7 @@ void RFspaceNetReceiver::setGain( int idx )
 
       rcv.setVUHFGains(isAutoMode, LNAValue , MixValue, IFOutputValue);
 
-      LOG_PRO( LOG_DEBUG, "setting AutoMode:             %s ", isAutoMode  ? "ON" : "OFF" );
+      LOG_PRO( LOG_DEBUG, "*** *** setting AutoMode:             %s ", isAutoMode  ? "ON" : "OFF" );
       if(!isAutoMode)
       {
         LOG_PRO( LOG_DEBUG, "setting LNA Value:            %d ", LNAValue );
@@ -759,48 +864,47 @@ void RFspaceNetReceiver::setGain( int idx )
 
 void RFspaceNetReceiver::setSamplerate( int idx )
 {
-  int numSamplerates = int(NUMEL(srate_bws));
+  const int numSamplerates = RFspaceNetReceiver::miNumSamplerates;
 
   if ( idx < 0 || idx > numSamplerates )
   {
     int newIdx = PROCLIP(idx, 0, numSamplerates);
-    LOG_PRO( LOG_ERROR, "RFspaceNetReceiver::setSamplerate(idx %d) : idx out of bounds --> Setting to %d", idx, newIdx);
+    LOG_PRO( LOG_ERROR, "*** *** RFspaceNetReceiver::setSamplerate(idx %d) : idx out of bounds --> Setting to %d", idx, newIdx);
     idx = newIdx;
+  }
+
+  bool bOk = false;
+  const bool bIsStreaming = rcv.isUDPDataStreamRunning(&bOk);
+
+  if (bIsStreaming && bOk)
+  {
+    LOG_PRO( LOG_ERROR, "*** *** RFspaceNetReceiver::setSamplerate(): send ChangedSamplerate-Callback while running!");
+    EXTIO_STATUS_CHANGE(mExtIOCallbackPtr , extHw_Changed_SampleRate);
+    mpoSettings->uiLastReportedSamplerate = mpoSettings->uiSamplerate;
+    return;
   }
 
   mpoSettings->iSampleRateIdx = idx;
   mpoSettings->uiSamplerate = srate_bws[idx].srate;
   mpoSettings->uiBandwidth = srate_bws[idx].bw;
 
-  bool bOk = false;
-
-  bool bIsStreaming = rcv.isUDPDataStreamRunning(&bOk);
-
-  if (bIsStreaming && bOk)
-  {
-    LOG_PRO( LOG_ERROR, "************************************** RFspaceNetReceiver::setSamplerate(): send ChangedSamplerate-Callback while running! *********************************");
-    EXTIO_STATUS_CHANGE(mExtIOCallbackPtr , extHw_Changed_SampleRate );
-    mpoSettings->uiLastReportedSamplerate = mpoSettings->uiSamplerate;
-    return;
-  }
-
   // currently not streaming:
-  LOG_PRO(LOG_DEBUG, "************************************** RFspaceNetReceiver::setSamplerate(%u): set Samplerate ************************", mpoSettings->uiSamplerate);
-  rcv.setIQOutSmpRate(RFspaceNetSDRControl::IQOutSmpRate(mpoSettings->uiSamplerate));
+  LOG_PRO(LOG_DEBUG, "*** *** * RFspaceNetReceiver::setSamplerate(%u): calling setIQOutSmpRate()", mpoSettings->uiSamplerate);
+  rcv.setIQOutSmpRate(mpoSettings->uiSamplerate);
 
   {
-    int changeBitRangeSmpRateIdx = getMaxSmpRateIdx(mpoSettings->iBitDepthThresSamplerate);
-    mNetSdrBitDepth = (mpoSettings->iSampleRateIdx <= changeBitRangeSmpRateIdx) ? 24 : 16;
+    mDeviceBitDepth = (mpoSettings->bUse16BitForAll) ? 16 : srate_bws[mpoSettings->iSampleRateIdx].maxBitDepth;
+    LOG_PRO(LOG_DEBUG, "*** *** * RFspaceNetReceiver::setSamplerate(%u): deviceBitDepth %d Bit", mpoSettings->uiSamplerate, mDeviceBitDepth);
 #if NORMALIZE_DATA
     mExtHwSampleFormat = extHw_SampleFormat_FLT32;
     mExtHwBitDepth = 32;
 #else
-    mExtHwSampleFormat = (mNetSdrBitDepth == 24) ? extHw_SampleFormat_PCM24 : extHw_SampleFormat_PCM16;
-    mExtHwBitDepth = (mNetSdrBitDepth == 24) ? 24 : 16;
+    mExtHwSampleFormat = (mDeviceBitDepth == 24) ? extHw_SampleFormat_PCM24 : extHw_SampleFormat_PCM16;
+    mExtHwBitDepth = (mDeviceBitDepth == 24) ? 24 : 16;
 #endif
     if (mLastReportedSampleFormat != mExtHwSampleFormat)
     {
-      LOG_PRO(LOG_PROTOCOL, "SEND STATUS CHANGE TO SDR: NEW BIT DEPTH %d Bit.", mExtHwBitDepth);
+      LOG_PRO(LOG_PROTOCOL, "*** *** * SEND STATUS CHANGE TO SDR: NEW BIT DEPTH %d Bit.", mExtHwBitDepth);
       EXTIO_STATUS_CHANGE(mExtIOCallbackPtr, mExtHwSampleFormat);
       mLastReportedSampleFormat = mExtHwSampleFormat;
     }
@@ -818,8 +922,8 @@ int RFspaceNetReceiver::getAttIdx()
   int ret = -1;
   for(int idx = 0; idx <= miNumAttenuations-1; ++idx)
   {
-    if( ( mafAttenuationATTs[idx] == mRFGaindB) && ( fabsf(mafAttenuationADGains[idx] - mADGain) < 0.1 ) )
-      LOG_PRO( LOG_DEBUG, "******** RFspaceNetReceiver::getAttIdx() : ADGain: %.1f, RFGain: %.1f --> idx: %d", mafAttenuationATTs[idx], mafAttenuationADGains[idx] , idx);
+    if( fabsf( mafAttenuationATTs[idx] - mRFGaindB) < 0.1 && ( fabsf(mafAttenuationADGains[idx] - mADGain) < 0.1 ) )
+      LOG_PRO( LOG_DEBUG, "*** *** RFspaceNetReceiver::getAttIdx() : ADGain: %.1f, RFGain: %.1f --> idx: %d", mafAttenuationATTs[idx], mafAttenuationADGains[idx] , idx);
     ret = idx;
     break;
   }
@@ -829,36 +933,21 @@ int RFspaceNetReceiver::getAttIdx()
 int RFspaceNetReceiver::getSmpRateIdx( uint32_t smpRate )
 {
   int ret = -1;
-  for(int idx = 0; idx < miNumSamplerates; ++idx)
-  {
-    int32_t delta = smpRate - srate_bws[idx].srate;
-    if( -10 <= delta && delta <= 10 )   // +/- 10 Hz tolerance
-    {
-      LOG_PRO( LOG_DEBUG, "********* RFspaceNetReceiver::getSmpRateIdx(%u) --> idx: %d", smpRate, idx);
-      ret = idx;
-      break;
-    }
-  }
-
-  if(ret == -1)
-    LOG_PRO(LOG_ERROR, "********* RFspaceNetReceiver::getSmpRateIdx(%u) --> idx: ERROR !", smpRate);
-
-  return ret;
-}
-
-
-int RFspaceNetReceiver::getMaxSmpRateIdx(uint32_t smpRate)
-{
-  int ret = -1;
   for (int idx = 0; idx < miNumSamplerates; ++idx)
   {
     if (smpRate >= srate_bws[idx].srate)
       ret = idx;
   }
+
   if (ret == -1)
-    LOG_PRO(LOG_ERROR, "********* RFspaceNetReceiver::getMaxSmpRateIdx(%u) --> idx: ERROR !", smpRate);
+  {
+    ret = RFspaceNetReceiver::miDefaultSrateIdx;
+    LOG_PRO(LOG_ERROR, "*** *** RFspaceNetReceiver::getSmpRateIdx(%u) --> idx: ERROR. Returning default idx %d = %u Hz!", smpRate, ret, srate_bws[ret].srate);
+  }
+  else if (smpRate == srate_bws[ret].srate)
+    LOG_PRO(LOG_ERROR, "*** *** RFspaceNetReceiver::getSmpRateIdx(%u) --> idx: %d fits exactly", smpRate, ret);
   else
-    LOG_PRO(LOG_DEBUG, "********* RFspaceNetReceiver::getMaxSmpRateIdx(%u) --> idx: %d", smpRate, ret);
+    LOG_PRO(LOG_ERROR, "*** *** RFspaceNetReceiver::getSmpRateIdx(%u) --> idx: %d with %u Hz is nearest", smpRate, ret, srate_bws[ret].srate);
 
   return ret;
 }
@@ -870,19 +959,16 @@ const int64_t * RFspaceNetReceiver::getFrequencyRanges(int idx)
   {
     switch(idx)
     {
-      case 0:
-        return &mRcvFrequencyRanges[0];
-      case 1:
-        return &mRcvFrequencyRanges[2];
-      default :
-        return nullptr;
+    case 0:   return &mRcvFrequencyRanges[0];
+    case 1:   return &mRcvFrequencyRanges[2];
+    default:  return nullptr;
     }
   }
   else
     return nullptr;
 }
 
-void RFspaceNetReceiver::TimerProc(uint16_t waitMs)
+void RFspaceNetReceiver::TimerProc(int waitMs)
 {
   if(mStartData)
   {
@@ -893,14 +979,14 @@ void RFspaceNetReceiver::TimerProc(uint16_t waitMs)
       mStartData = false;
       setGain(mpoSettings->iControlValue);
 
-      if (mNetSdrBitDepth==24)
+      if (mDeviceBitDepth == 24)
       {
-        LOG_PRO(LOG_DEBUG, "**************** RFspaceNetReceiver::setSamplerate(): START 24 BIT DATA STREAM *********************************");
+        LOG_PRO(LOG_DEBUG, "*** *** RFspaceNetReceiver::TimerProc(): START DATA STREAM with 24 BIT");
         rcv.start24BitDataStream();
       }
-      else if (mNetSdrBitDepth==16)
+      else if (mDeviceBitDepth == 16)
       {
-        LOG_PRO(LOG_DEBUG, "**************** RFspaceNetReceiver::setSamplerate(): START 16 BIT DATA STREAM *********************************");
+        LOG_PRO(LOG_DEBUG, "*** *** RFspaceNetReceiver::TimerProc(): START DATA STREAM with 16 BIT");
         rcv.start16BitDataStream();
       }
     }
@@ -913,26 +999,38 @@ void RFspaceNetReceiver::TimerProc(uint16_t waitMs)
   rcv.poll();
   udp.poll();
 
+  //if (mReportChangedSamplerates)  // -> checkReportChangedSamplerates()
+  //  EXTIO_STATUS_CHANGE(mExtIOCallbackPtr, extHw_Stop);
+
   if(mTime >= mWaitTimeInMilliseconds)
   {
     rcv.requestReceiverState();
     mTime = 0;
 
     if( (mControlPingTime >= mWaitTimeInMilliseconds ) )
-    {
-      LOG_PRO( LOG_DEBUG, "********* RFspaceNetReceiver::ThreadProc(%u ms/ThreadCycle): HAVEN'T RECEIVED CONTROL HEARTBEAT FOR %d MILLISECONDS ! ", waitMs, mControlPingTime);
-    }
+      LOG_PRO(LOG_DEBUG, "*** *** RFspaceNetReceiver::TimerProc(every %d ms): HAVEN'T RECEIVED CONTROL HEARTBEAT FOR %d MILLISECONDS!", waitMs, mControlPingTime);
     else
-      LOG_PRO( LOG_DEBUG, "********* RCV_STATE : CONTROL HEARTBEAT IS UP AND RUNNING" );
+      LOG_PRO(LOG_DEBUG, "*** *** RFspaceNetReceiver::TimerProc(every %d ms): RCV_STATE : CONTROL HEARTBEAT IS UP AND RUNNING", waitMs );
 
-    if( mTimeWithoutDataInMilliseconds >= mUDPWaitTimeInMilliseconds )
+    if (mStartData)
     {
-      LOG_PRO( LOG_DEBUG, "********* RFspaceNetReceiver::ThreadProc(%u ms/ThreadCycle): HAVEN'T RECEIVED UDP HEARTBEAT FOR %d MILLISECONDS ! ", waitMs, mTimeWithoutDataInMilliseconds);
+      if (mTimeWithoutDataInMilliseconds >= mUDPWaitTimeInMilliseconds)
+        LOG_PRO(LOG_DEBUG, "*** *** RFspaceNetReceiver::TimerProc(every %d ms): HAVEN'T RECEIVED UDP HEARTBEAT FOR %d MILLISECONDS!", waitMs, mTimeWithoutDataInMilliseconds);
+      else
+        LOG_PRO(LOG_DEBUG, "*** *** RFspaceNetReceiver::TimerProc(every %d ms): UDP DATA IS UP AND RUNNING", waitMs);
     }
-    else
-      LOG_PRO( LOG_DEBUG, "********* RFspaceNetReceiver::ThreadProc(%u ms/ThreadCycle): UDP DATA IS UP AND RUNNING, TIME WITHOUT DATA: %u ms", waitMs, mTimeWithoutDataInMilliseconds);
   }
 
 }
 
+
+void RFspaceNetReceiver::checkReportChangedSamplerates()
+{
+  if (mReportChangedSamplerates)
+  {
+    EXTIO_STATUS_CHANGE(mExtIOCallbackPtr, extHw_Changed_SRATES);
+    EXTIO_STATUS_CHANGE(mExtIOCallbackPtr, extHw_Changed_SampleRate);
+    mReportChangedSamplerates = false;
+  }
+}
 

@@ -8,8 +8,6 @@
 // forward declaration
 class CSimpleSocket;
 
-//*********************TODOs*************************************************************************************
-//***************************************************************************************************************
 
 class RFspaceNetSDRControl
 {
@@ -19,7 +17,22 @@ public:
    {
    public:
 
-    enum class Info { FREQUENCY, ADC_SCALE, RF_GAIN, VUHF_INFO, RF_FILTER, ADC_MODE, IQ_OUT_SAMPLERATE, UDP_PACKET_SIZE, UDP_INTERFACE, RCV_STATE , OPTIONS, NAK };
+    enum class Info {
+        FREQUENCY
+      , ADC_SCALE
+      , RF_GAIN
+      , VUHF_INFO
+      , RF_FILTER
+      , ADC_MODE
+      , IQ_OUT_SAMPLERATE
+      , UDP_PACKET_SIZE
+      , UDP_INTERFACE
+      , RCV_STATE
+      , OPTIONS
+      , NAK
+      , REQ_TARGET  // Target got requested
+      , SET_TARGET  // Target got set
+    };
 
     virtual ~CallbackIfc() { }
     virtual void receiveRFspaceNetSDRControlInfo(Info info) = 0;
@@ -61,35 +74,6 @@ public:
   // 4.2.8 A/D Modes ***************
   enum class ADGain : uint8_t { ADGain_1_5 = 0x02, ADGain_1 = 0x00 };
 
-  // A/D Converter frequency = 80 MHz
-  static const uint32_t ADC_FREQ = 80 * 1000 * 1000;
-
-  // 4.2.9I/Q Output Data Sample Rate ***************
-  // this enum has to be in sync with RFspaceNetReceiver::srate_bws[]
-  enum class IQOutSmpRate : uint32_t {
-          SR_12kHz    = ADC_FREQ / 6400
-        , SR_16kHz    = ADC_FREQ / 5000
-        , SR_32kHz    = ADC_FREQ / 2500
-        , SR_62kHz    = ADC_FREQ / 1280
-        , SR_80kHz    = ADC_FREQ / 1000
-        , SR_100kHz   = ADC_FREQ / 800
-        , SR_125kHz   = ADC_FREQ / 640
-        , SR_160kHz   = ADC_FREQ / 500
-        , SR_200kHz   = ADC_FREQ / 400
-        , SR_250kHz   = ADC_FREQ / 320
-        , SR_312kHz   = ADC_FREQ / 256
-        , SR_400kHz   = ADC_FREQ / 200
-        , SR_500kHz   = ADC_FREQ / 160
-        , SR_625kHz   = ADC_FREQ / 128
-        , SR_800kHz   = ADC_FREQ / 100
-        , SR_1000kHz  = ADC_FREQ / 80
-        , SR_1250kHz  = ADC_FREQ / 64
-        , SR_1538kHz  = ADC_FREQ / 52
-        , SR_1666kHz  = ADC_FREQ / 48
-        , SR_1818kHz  = ADC_FREQ / 44
-        , SR_2000kHz  = ADC_FREQ / 40
-  };
-
   // 4.4.2 Data Output Packet Size ***************
   enum class UDPPacketSize : uint8_t { SMALL = 1, LARGE = 0 };
 
@@ -126,7 +110,7 @@ public:
   const unsigned getUDPPortNum(bool *pbOk) const;
   const CWStartup & getCWStartup(bool *pbOk) const;
 
-  const IQOutSmpRate getIQOutSmpRate(bool *pbOk) const;
+  const uint32_t getIQOutSmpRate(bool *pbOk) const;
   const UDPPacketSize getUDPPacketSize(bool *pbOk) const;
 
   const int64_t getRcvFrequency(bool *pbOk) const;
@@ -150,14 +134,16 @@ public:
   void setVUHFGains( bool isAutoMode, int LNAGain, int MixGain, int IFOutGain );
   void setRFFilterSelection( RfFilterSel );
   void setADModes( bool isDithering, ADGain );
-  void setIQOutSmpRate ( IQOutSmpRate );
+  void setIQOutSmpRate(uint32_t);
   void setUPDPacketSize ( UDPPacketSize );
   void setUDPInterface( const char * ip, uint16_t portNum );
   void setCWStartup ( uint8_t wpm, CWFreq , const char * asciiMessage);
+  void setTargetName(const char * name);
 
   void start24BitDataStream();
   void start16BitDataStream();
   void stopDataStream();
+  inline bool dataStreamShouldRun() const { return !mTriggeredStop; }
 
   void requestReceiverState();
   void requestOptions();
@@ -182,7 +168,7 @@ private:
   static void printFilterText(const int &, const char * pacPreText = "received from device:");
   static void printText(const bool &, const char * pacPreText = "received from device:");
   static void printText(const float &, const char * pacPreText = "received from device:");
-  static void printText(const IQOutSmpRate &, const char * pacPreText = "received from device:");
+  static void printSrateText(const uint32_t, const char * pacPreText = "received from device:");
   static void printText(const UDPPacketSize &, const char * pacPreText = "received from device:");
   static void printText(const RfGain &, const char * pacPreText = "received from device:");
   static void printUDPIPText(const char * ip, const char * pacPreText = "received from device:");
@@ -259,6 +245,7 @@ public:
 
 private:
 
+  // Msg Type Byte == (3 Bit) << 1
   enum class MsgType : uint8_t { SET_CTRL_ITEM = 0x00, REQ_CTRL_ITEM = 0x20,  REQ_CTRL_RANGE = 0x40};
 
   // 4.2.1 Receiver State ***************
@@ -464,12 +451,13 @@ private:
   float mRcvADAmplScale;
   bool mHasRcvADAmplScale = false;
 
-  IQOutSmpRate mIQOutSmpRate;
+  uint32_t mIQOutSmpRate;
   bool mHasIQOutSmpRate = false;
 
   UDPPacketSize mUDPPacketSize;
   bool mHasUDPPacketSize = false;
 
+  volatile bool mTriggeredStop = true;
 
   uint8_t mHexArray[10];
 
@@ -485,7 +473,7 @@ private:
 const char * getText( RFspaceNetSDRControl::RfGain);
 const char * getFilterText( int filterSel );
 const char * getText( RFspaceNetSDRControl::ADGain );
-const char * getText( RFspaceNetSDRControl::IQOutSmpRate );
+const char * getSrateText(uint32_t);
 const char * getText( RFspaceNetSDRControl::UDPPacketSize );
 const char * getText( RFspaceNetSDRControl::CWFreq );
 const char * getText( uint8_t chnSetup );

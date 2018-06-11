@@ -234,11 +234,13 @@ void RFspaceNetSDRControl::resetReceiverData()
   mADModes.clear();
   mHasADModes = false;
 
-  mIQOutSmpRate = RFspaceNetSDRControl::IQOutSmpRate::SR_500kHz;
+  mIQOutSmpRate = 500 * 1000;
   mHasIQOutSmpRate = false;
 
   mUDPPacketSize = UDPPacketSize::LARGE;
   mHasUDPPacketSize = false;
+
+  mTriggeredStop = true;
 
   mUDPIpAddress[0] = 0;
   mUDPPortNum = 0;
@@ -260,7 +262,6 @@ void RFspaceNetSDRControl::resetReceiverData()
 
 bool RFspaceNetSDRControl::connect(const char * ip, unsigned portNo, int nConnectTimeoutMillis)
 {
-
   if ( mSocket.IsSocketPeerOpen() )
   {
     LOG_PRO( LOG_ERROR, "ERROR: Socket already connected !");
@@ -291,6 +292,7 @@ bool RFspaceNetSDRControl::connect(const char * ip, unsigned portNo, int nConnec
     requestInterfaceVersion();
     requestHwFwVersions(RFspaceNetSDRControl::HwFw::BOOT_CODE);
     requestProductId();
+    requestRcvFrequencyRanges();
     requestStatus();
   }
 
@@ -619,7 +621,7 @@ const RFspaceNetSDRControl::CWStartup & RFspaceNetSDRControl::getCWStartup(bool 
 }
 
 
-const RFspaceNetSDRControl::IQOutSmpRate RFspaceNetSDRControl::getIQOutSmpRate(bool *pbOk) const
+const uint32_t RFspaceNetSDRControl::getIQOutSmpRate(bool *pbOk) const
 {
   if(pbOk)
     *pbOk = mHasIQOutSmpRate;
@@ -770,8 +772,6 @@ void RFspaceNetSDRControl::setRcvFreq( int64_t rcvFreqHz)
   WRITE_LITTLE_INT64( rcvFreqHz , wp ); //write frequency to last 5 bytes of buffer
 
   mSocket.Send(acBuf, len);
-  requestRcvFrequency();
-  requestRcvFrequencyRanges();
 }
 
 
@@ -855,12 +855,8 @@ void RFspaceNetSDRControl::setADModes( bool isDithering, ADGain gain )
 {
   if ( mSocket.IsSocketInvalid() )
     return;
-  uint8_t dither;
 
-  if(isDithering)
-    dither = uint8_t(ADDither::DITH_ON);
-  else
-    dither = uint8_t(ADDither::DITH_OFF);
+  uint8_t dither = (isDithering) ? uint8_t(ADDither::DITH_ON) : uint8_t(ADDither::DITH_OFF);
 
   const unsigned int len = 6;
   unsigned char acBuf[len] = { 6, 0, 0x8A, 0, 0, 0 };
@@ -872,10 +868,9 @@ void RFspaceNetSDRControl::setADModes( bool isDithering, ADGain gain )
   WRITE_LITTLE_INT8( mode , wp ); //write frequency to last byte of buffer
 
   mSocket.Send(acBuf, len);
-  requestADMode();
 }
 
-void RFspaceNetSDRControl::setIQOutSmpRate( IQOutSmpRate smpRate )
+void RFspaceNetSDRControl::setIQOutSmpRate(uint32_t smpRate)
 {
   if ( mSocket.IsSocketInvalid() )
     return;
@@ -885,7 +880,7 @@ void RFspaceNetSDRControl::setIQOutSmpRate( IQOutSmpRate smpRate )
   void * wp = &acBuf[len-4];
 
   // channel information can be ignored since all channels have to have the same value
-  WRITE_LITTLE_INT32( uint32_t(smpRate) , wp ); //write frequency to last 4 bytes of buffer
+  WRITE_LITTLE_INT32( smpRate, wp ); //write frequency to last 4 bytes of buffer
 
   mSocket.Send(acBuf, len);
 }
@@ -906,9 +901,6 @@ void RFspaceNetSDRControl::setUPDPacketSize ( UDPPacketSize packetSize)
 
 void RFspaceNetSDRControl::setUDPInterface ( const char * ip, uint16_t portNum )
 {
-  //requestUDPInterface();
-  // return;
-
   if ( mSocket.IsSocketInvalid() )
     return;
 
@@ -973,18 +965,49 @@ void RFspaceNetSDRControl::setCWStartup ( uint8_t wpm, CWFreq cwFreq, const char
   mSocket.Send(acBuf, len);
 }
 
+void RFspaceNetSDRControl::setTargetName(const char * name)
+{
+    if ( mSocket.IsSocketInvalid() )
+      return;
+
+    int slen = strlen(name);
+    uint8_t len = uint8_t(4 + slen + 1);
+    PROASSERT(len <= 32);
+
+    uint8_t acBuf[4+32] = { len, 0x0, 0x1, 0x0
+                         , 0, 0, 0, 0, 0, 0, 0, 0
+                         , 0, 0, 0, 0, 0, 0, 0, 0
+                         , 0, 0, 0, 0, 0, 0, 0, 0
+                         , 0, 0, 0, 0, 0, 0, 0, 0 };
+    void * p = &acBuf[4];
+    char * pc = (char*)p;
+    strncpy( pc, name, 31 );
+
+    unsigned msgLen = len; //                                                      0 1 2 3 4 5 6 7 8 9
+    LOG_PRO( LOG_PROTOCOL, "\n\nfor target '%s' transmitting %u bytes. %x %x %x %x %c%c%c%c%c%c%c%c%c%c"
+             , name, msgLen
+             , unsigned(acBuf[0]), unsigned(acBuf[1]), unsigned(acBuf[2]), unsigned(acBuf[3])
+             , pc[0], pc[1], pc[2], pc[3], pc[4], pc[5], pc[6], pc[7], pc[8], pc[9]
+             );
+    mSocket.Send(acBuf, msgLen);
+}
+
+
 void RFspaceNetSDRControl::start24BitDataStream()
 {
   setRcvState( UDPstate::START_UDP_DATA, ADCstate::SET_IQ_BASEBAND_DATA, BitDepthState::SET_24BIT_MODE, CaptureMode::SET_CONTIGUOUS_MODE );
+  mTriggeredStop = false;
 }
 
 void RFspaceNetSDRControl::start16BitDataStream()
 {
   setRcvState( UDPstate::START_UDP_DATA, ADCstate::SET_IQ_BASEBAND_DATA, BitDepthState::SET_16BIT_MODE, CaptureMode::SET_CONTIGUOUS_MODE);
+  mTriggeredStop = false;
 }
 
 void RFspaceNetSDRControl::stopDataStream()
 {
+  mTriggeredStop = true;
   setRcvState( UDPstate::STOP_UDP_DATA, ADCstate::SET_IQ_BASEBAND_DATA, BitDepthState::SET_16BIT_MODE, CaptureMode::SET_CONTIGUOUS_MODE); // args 2,3,4 are dummy values --> ignored by NetSDR
 }
 
@@ -993,7 +1016,6 @@ void RFspaceNetSDRControl::stopDataStream()
 
 bool RFspaceNetSDRControl::poll(  )
 {
-
   if ( mSocket.IsSocketInvalid() )
     return false;
 
@@ -1029,6 +1051,7 @@ bool RFspaceNetSDRControl::poll(  )
         }
         else
         {
+          //LOG_PRO( LOG_PROTOCOL, "\n\nreceived Type %u Len %u\n", mRxType, mRxMsgLen);
           processReceivedControlMessage(true);
           mRxLen = 0;
           mRxMsgLen = 2;
@@ -1090,10 +1113,18 @@ bool RFspaceNetSDRControl::processReceivedControlMessage(bool isValidMessage)
       break;
 
     case 0x0001:  // 4.1.1 Target Name
-      wp = &mRxBuffer[4];
-      strncpy(mTargetName,(const char*)(wp),31 );
-      mHasTargetName = true;
-      LOG_PRO( LOG_DEBUG, "received %s : '%s'", getControlItemText(uControlItemCode), mTargetName);
+      LOG_PRO( LOG_DEBUG, "received Target : Type %u Len %u", mRxType, mRxMsgLen );
+      if ( MsgType(mRxType << 5) == MsgType::SET_CTRL_ITEM )
+      {
+          wp = &mRxBuffer[4];
+          memset(mTargetName, 0, sizeof(mTargetName));
+          strncpy(mTargetName,(const char*)(wp), mRxMsgLen);
+          mHasTargetName = true;
+          LOG_PRO( LOG_DEBUG, "received %s : '%s'", getControlItemText(uControlItemCode), mTargetName);
+          mpCallBack->receiveRFspaceNetSDRControlInfo(CallbackIfc::Info::SET_TARGET);
+      }
+      else if ( MsgType(mRxType << 5) == MsgType::REQ_CTRL_ITEM )
+          mpCallBack->receiveRFspaceNetSDRControlInfo(CallbackIfc::Info::REQ_TARGET);
       break;
 
     case 0x0002:  // 4.1.2 Serial Number
@@ -1273,7 +1304,7 @@ bool RFspaceNetSDRControl::processReceivedControlMessage(bool isValidMessage)
     case 0x00B8:  // 4.2.10 IQ Output Data Samplerate
       mHasIQOutSmpRate = true;
       wp = &mRxBuffer[5];
-      mIQOutSmpRate = IQOutSmpRate(READ_LITTLE_INT32( wp ));
+      mIQOutSmpRate = READ_LITTLE_INT32( wp );
       //printText(mIQOutSmpRate);
       if(mpCallBack)
         mpCallBack->receiveRFspaceNetSDRControlInfo(CallbackIfc::Info::IQ_OUT_SAMPLERATE);
@@ -1354,7 +1385,7 @@ void RFspaceNetSDRControl::parseOptionBits( ) // parameter2-bits currently not d
 }
 
 
-void RFspaceNetSDRControl::parseRcvStateBytes( ) // parameter2-bits currently not defined !
+void RFspaceNetSDRControl::parseRcvStateBytes() // parameter2-bits currently not defined !
 {
   void * wp = &mRxBuffer[4];
   unsigned int parBytes = READ_BIG_INT32( wp ); //Big Endian because information fields are only 1 byte each --> Little Endian for fields bigger than 8bits
@@ -1403,62 +1434,71 @@ void RFspaceNetSDRControl::parseRcvFrequencies( ) //data up to 40bits when frequ
       mHasRcvFrequencyRanges = true;
       wp = &mRxBuffer[4];
       const RFspaceNetSDRControl::NCOChannel channel = RFspaceNetSDRControl::NCOChannel( READ_LITTLE_INT8(wp) );
+      const char * channelStr = (RFspaceNetSDRControl::NCOChannel::CHN1 == channel) ? "1"
+        : (RFspaceNetSDRControl::NCOChannel::CHN2 == channel) ? "2"
+        : (RFspaceNetSDRControl::NCOChannel::CHN12 == channel) ? "1+2" : "?";
+
       wp = &mRxBuffer[5];
-      unsigned char rangeNum = READ_LITTLE_INT8(wp);
+      const unsigned char rangeNum = READ_LITTLE_INT8(wp);
+      const int numRanges = rangeNum;
       int dataIdx = 6;
-      for(unsigned char i = 0 ; i < rangeNum; i++)
+
+      for (int i = 0; i < numRanges; ++i)
       {
-        uint64_t minFrequency = 0;
-        uint64_t maxFrequency = 0;
-        uint64_t VCOFrequency = 0;
-
         wp = &mRxBuffer[dataIdx];
-        minFrequency = READ_LITTLE_INT64(wp);
+        uint64_t minFrequency = READ_LITTLE_INT64(wp);
         wp = &mRxBuffer[dataIdx+5];
-        maxFrequency = READ_LITTLE_INT64(wp);
+        uint64_t maxFrequency = READ_LITTLE_INT64(wp);
         wp = &mRxBuffer[dataIdx+10];
-        VCOFrequency = READ_LITTLE_INT64(wp);
+        uint64_t VCOFrequency = READ_LITTLE_INT64(wp);
+        dataIdx += 15;
 
-        dataIdx = dataIdx+15;
+        minFrequency &= 0xFFFFFFFFFF;
+        maxFrequency &= 0xFFFFFFFFFF;
+        VCOFrequency &= 0xFFFFFFFFFF;
+
+        LOG_PRO(LOG_DEBUG, "<-- received CTRL_RANGE: channel %s, range %d of %d: %ld - %ld Hz. VCO %ld Hz"
+          , channelStr, i, numRanges
+          , long(minFrequency), long(maxFrequency), long(VCOFrequency));
+
         if(channel == RFspaceNetSDRControl::NCOChannel::CHN1)
         {
-          if(i == 0)
+          if (i == 0)
           {
-            mRcvFrequencies.Chn1_Bnd1_MinFreq = minFrequency & 0xFFFFFFFFFF;
-            mRcvFrequencies.Chn1_Bnd1_MaxFreq = maxFrequency & 0xFFFFFFFFFF;
-            mRcvFrequencies.Chn1_Bnd1_VCO_DwnConvFreq = VCOFrequency & 0xFFFFFFFFFF;
+            mRcvFrequencies.Chn1_Bnd1_MinFreq = mRcvFrequencyRanges[0] = minFrequency;
+            mRcvFrequencies.Chn1_Bnd1_MaxFreq = mRcvFrequencyRanges[1] = maxFrequency;
+            mRcvFrequencies.Chn1_Bnd1_VCO_DwnConvFreq = VCOFrequency;
           }
-          else
+          else if (i == 1)
           {
-            mRcvFrequencies.Chn1_Bnd2_MinFreq = minFrequency & 0xFFFFFFFFFF;
-            mRcvFrequencies.Chn1_Bnd2_MaxFreq = maxFrequency & 0xFFFFFFFFFF;
-            mRcvFrequencies.Chn1_Bnd2_VCO_DwnConvFreq = VCOFrequency & 0xFFFFFFFFFF;
+            mRcvFrequencies.Chn1_Bnd2_MinFreq = mRcvFrequencyRanges[2] = minFrequency;
+            mRcvFrequencies.Chn1_Bnd2_MaxFreq = mRcvFrequencyRanges[3] = maxFrequency;
+            mRcvFrequencies.Chn1_Bnd2_VCO_DwnConvFreq = VCOFrequency;
           }
         }
         else if(channel == RFspaceNetSDRControl::NCOChannel::CHN2)
         {
-          if(i == 0)
+          if (i == 0)
           {
-            mRcvFrequencies.Chn2_Bnd1_MinFreq = minFrequency & 0xFFFFFFFFFF;
-            mRcvFrequencies.Chn2_Bnd1_MaxFreq = maxFrequency & 0xFFFFFFFFFF;
-            mRcvFrequencies.Chn2_Bnd1_VCO_DwnConvFreq = VCOFrequency & 0xFFFFFFFFFF;
+            mRcvFrequencies.Chn2_Bnd1_MinFreq = minFrequency;
+            mRcvFrequencies.Chn2_Bnd1_MaxFreq = maxFrequency;
+            mRcvFrequencies.Chn2_Bnd1_VCO_DwnConvFreq = VCOFrequency;
           }
-          else
+          else if (i == 1)
           {
-            mRcvFrequencies.Chn2_Bnd2_MinFreq = minFrequency & 0xFFFFFFFFFF;
-            mRcvFrequencies.Chn2_Bnd2_MaxFreq = maxFrequency & 0xFFFFFFFFFF;
-            mRcvFrequencies.Chn2_Bnd2_VCO_DwnConvFreq = VCOFrequency & 0xFFFFFFFFFF;
+            mRcvFrequencies.Chn2_Bnd2_MinFreq = minFrequency;
+            mRcvFrequencies.Chn2_Bnd2_MaxFreq = maxFrequency;
+            mRcvFrequencies.Chn2_Bnd2_VCO_DwnConvFreq = VCOFrequency;
           }
         }
         else
           LOG_PRO( LOG_DEBUG, "ERROR ! --> Channel selection not allowed (?) ");
-
-        //Only one channel is supported by current NetSDR setup
-        mRcvFrequencyRanges[0] = mRcvFrequencies.Chn1_Bnd1_MinFreq;
-        mRcvFrequencyRanges[1] = mRcvFrequencies.Chn1_Bnd1_MaxFreq;
-        mRcvFrequencyRanges[2] = mRcvFrequencies.Chn1_Bnd2_MinFreq;
-        mRcvFrequencyRanges[3] = mRcvFrequencies.Chn1_Bnd2_MaxFreq;
       }
+
+      LOG_PRO(LOG_DEBUG, "<-- -- received CTRL_RANGE: %ld - %ld, %ld - %ld Hz",
+        long(mRcvFrequencyRanges[0]), long(mRcvFrequencyRanges[1]),
+        long(mRcvFrequencyRanges[2]), long(mRcvFrequencyRanges[3]) );
+
       break;
     }
 
@@ -1611,7 +1651,7 @@ void RFspaceNetSDRControl::printText(const VUHFGains & vuhfGains, const char * p
   LOG_PRO( LOG_DEBUG, "  V/UHF IF Gain:  %u", vuhfGains.IFOutputGainLevel );
 }
 
-void RFspaceNetSDRControl::printText(const IQOutSmpRate & smpRate, const char * pacPreText)
+void RFspaceNetSDRControl::printSrateText(const uint32_t smpRate, const char * pacPreText)
 {
   LOG_PRO(LOG_DEBUG, "%s IQ Sample Rate: %u Hz", pacPreText, unsigned(smpRate));
 }
@@ -1858,6 +1898,8 @@ const char * getText( RFspaceNetSDRControl::CallbackIfc::Info e)
     case RFspaceNetSDRControl::CallbackIfc::Info::RCV_STATE        : return "RCV_STATE";
     case RFspaceNetSDRControl::CallbackIfc::Info::OPTIONS          : return "OPTIONS";
     case RFspaceNetSDRControl::CallbackIfc::Info::NAK              : return "NAK";
+    case RFspaceNetSDRControl::CallbackIfc::Info::REQ_TARGET       : return "REQ_TARGET";
+    case RFspaceNetSDRControl::CallbackIfc::Info::SET_TARGET       : return "SET_TARGET";
     default:    return "ERROR !";
     }
 }

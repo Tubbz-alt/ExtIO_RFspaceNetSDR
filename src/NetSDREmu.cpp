@@ -27,6 +27,7 @@ volatile bool gRunUDP = false;
 volatile bool gPrepData = true;
 volatile int gBitDepth = 16;
 volatile unsigned gSampleRate = 32000;
+const char * gszTarget = "NetSDR";
 
 
 int NonExtIOCallback(int cnt, int status, float IQoffs, void *IQdata)
@@ -196,6 +197,10 @@ public:
             break;
         case Info::OPTIONS:
         case Info::NAK:
+            break;
+        case Info::REQ_TARGET:
+            mCtrl.setTargetName(gszTarget);
+            fprintf(stderr, "\n\nreport Target '%s'\n\n", gszTarget);
         default: ;
         }
 
@@ -253,6 +258,11 @@ int main(int argc, char **argv)
             dataPort = atoi( argv[i] );
             fprintf(stderr, "parsed dataPort %u from %s\n", dataPort, argv[i] );
         }
+        if ( ++i < argc )
+        {
+            gszTarget = argv[i];
+            fprintf(stderr, "using target %s\n", argv[i] );
+        }
         break;
     }
 
@@ -271,7 +281,7 @@ int main(int argc, char **argv)
 
     if ( printUsage )
     {
-        fprintf(stderr, "usage: NetSDRemu <srate /kHz> <bitDepth 16/24> <mtuSize 0=LARGE/1=SMALL> <ctrlPort =50000> <dataPort = 0>\n" );
+        fprintf(stderr, "usage: NetSDRemu <srate /kHz> <bitDepth 16/24> <mtuSize 0=LARGE/1=SMALL> <ctrlPort =50000> <dataPort = 0> <target ='NetSDR'/'CloudIQ'>\n" );
         return 10;
     }
 
